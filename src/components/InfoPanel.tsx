@@ -4,7 +4,7 @@ import { useStore } from '../store'
 import { calculateOrbitalPeriod } from '../utils/keplerOrbit'
 
 function InfoPanel() {
-  const { selectedBody, selectBody, focusBody, setFocusBody, updateCelestialBody, setCurrentPage, setSelectedPlanetId } = useStore()
+  const { selectedBody, selectBody, focusBody, setFocusBody, updateCelestialBody, navigateToDetail } = useStore()
   const [isEditing, setIsEditing] = useState(false)
   const [showOrbitParams, setShowOrbitParams] = useState(false)
   const [editableBody, setEditableBody] = useState(selectedBody ? { ...selectedBody } : null)
@@ -291,8 +291,7 @@ function InfoPanel() {
             {isHabitablePlanet && (
               <button
                 onClick={() => {
-                  setSelectedPlanetId(selectedBody.id)
-                  setCurrentPage('detail')
+                  navigateToDetail(selectedBody.id)
                 }}
                 className="w-full py-2 px-4 rounded-lg transition-colors text-sm flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white"
               >

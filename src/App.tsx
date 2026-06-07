@@ -1,5 +1,5 @@
 import { Canvas } from '@react-three/fiber'
-import { Suspense, useRef, useMemo } from 'react'
+import { Suspense, useRef, useMemo, useEffect } from 'react'
 import { OrbitControls, Stars } from '@react-three/drei'
 import Scene from './components/Scene'
 import ControlPanel from './components/ControlPanel'
@@ -7,6 +7,7 @@ import InfoPanel from './components/InfoPanel'
 import PerformanceMonitor from './components/PerformanceMonitor'
 import DetailPage from './components/DetailPage'
 import { useStore } from './store'
+import { parseHash } from './utils/router'
 import * as THREE from 'three'
 
 function SceneWrapper() {
@@ -85,8 +86,15 @@ function NebulaEffect({ brightness, distanceScale }: { brightness: number; dista
 }
 
 function App() {
-  const { selectedBody, backgroundColor, distanceScale, currentPage } = useStore()
+  const { selectedBody, backgroundColor, distanceScale, currentPage, navigateToDetail } = useStore()
   const cameraPosition = useMemo(() => [0, 30 * distanceScale, 50 * distanceScale], [distanceScale])
+
+  useEffect(() => {
+    const route = parseHash()
+    if (route.page === 'detail') {
+      navigateToDetail(route.planetId)
+    }
+  }, [navigateToDetail])
 
   if (currentPage === 'detail') {
     return <DetailPage />

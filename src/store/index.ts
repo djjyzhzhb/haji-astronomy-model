@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { StoreState, CelestialBody, DetailPageState } from '../types'
 import { createSimpleOrbit } from '../utils/keplerOrbit'
 import { TextureParams } from '../utils/textureGenerator'
+import { setHash } from '../utils/router'
 
 // 默认天体数据
 const defaultCelestialBodies: CelestialBody[] = [
@@ -213,6 +214,16 @@ export const useStore = create<StoreState & { celestialBodies: CelestialBody[], 
       textureParams: { ...state.detailPageState.textureParams, ...updates }
     }
   })),
+
+  navigateToDetail: (planetId: string) => {
+    set({ currentPage: 'detail', selectedPlanetId: planetId })
+    setHash({ page: 'detail', planetId })
+  },
+
+  navigateToMain: () => {
+    set({ currentPage: 'main', selectedPlanetId: null })
+    setHash({ page: 'main' })
+  },
 
   updateCelestialBody: (id, updates) => set((state) => ({
     celestialBodies: state.celestialBodies.map(body => 

@@ -1,7 +1,7 @@
 import { 
   ArrowLeft, Settings, Layers, RotateCw, ZoomIn, Zap, Cloud, Wind, Mountain, Palette, 
   Droplets, Maximize2, Sun, Moon, Sunrise, Cpu, Globe, Eye, EyeOff, Monitor, Maximize,
-  Map, Plus, Minimize2
+  Map, Plus, Minimize2, X
 } from 'lucide-react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { OrbitControls, Stars } from '@react-three/drei'
@@ -729,7 +729,8 @@ function DetailPage() {
     celestialBodies,
     detailPageState,
     updateDetailPageState,
-    updateTextureParams
+    updateTextureParams,
+    navigateToMain
   } = useStore()
   
   const planet = celestialBodies.find(body => body.id === selectedPlanetId)
@@ -745,6 +746,7 @@ function DetailPage() {
   const [expandedSection, setExpandedSection] = useState<string | null>('basic')
   const [isPaused, setIsPaused] = useState(false)
   const [showMap, setShowMap] = useState(false)
+  const [controlsOpen, setControlsOpen] = useState(false)
   const dayNightRef = useRef({
     dayTime: detailPageState.dayTime,
     speed: detailPageState.dayNightCycleSpeed
@@ -770,8 +772,7 @@ function DetailPage() {
   }, [isPaused, updateDetailPageState])
 
   const handleBack = () => {
-    setSelectedPlanetId(null)
-    setCurrentPage('main')
+    navigateToMain()
   }
 
   const toggleSection = (section: string) => {
@@ -843,15 +844,38 @@ function DetailPage() {
         <p className="text-gray-300 mt-2 text-sm max-md:hidden">高分辨率 3D 渲染</p>
       </div>
 
-      {/* 参数控制面板 */}
-      <div className="absolute top-24 right-6 z-20 w-80 max-md:fixed max-md:inset-x-0 max-md:top-auto max-md:bottom-0 max-md:w-full max-md:rounded-2xl max-md:rounded-b-none max-md:max-h-[55vh] max-md:z-40 bg-gray-800/85 backdrop-blur-md rounded-2xl border border-gray-700/50 shadow-2xl overflow-hidden max-h-[calc(100vh-12rem)] overflow-y-auto">
-        <div className="p-4 border-b border-gray-700/50 flex items-center gap-2">
-          <Settings size={18} className="text-blue-400" />
-          <h3 className="text-white font-semibold">参数控制</h3>
-        </div>
-        
-        <div className="divide-y divide-gray-700/50">
-          {/* 基本参数 */}
+      {/* 可伸缩参数面板 */}
+      <>
+        {controlsOpen && (
+          <div
+            className="fixed inset-0 z-35 bg-black/30"
+            onClick={() => setControlsOpen(false)}
+          />
+        )}
+        <div className={`
+          fixed z-40 transition-transform duration-300 ease-in-out
+          max-md:bottom-0 max-md:inset-x-0 max-md:rounded-t-2xl max-md:max-h-[55vh]
+          md:top-16 md:right-0 md:h-[calc(100vh-4rem)] md:rounded-l-2xl
+          w-80 max-md:w-full bg-gray-800/95 backdrop-blur-md
+          border border-gray-700/50 shadow-2xl overflow-hidden
+          flex flex-col
+          ${controlsOpen ? 'translate-x-0 max-md:translate-y-0' : 'md:translate-x-full max-md:translate-y-full'}
+        `}>
+          <div className="flex items-center justify-between p-4 border-b border-gray-700/50 shrink-0">
+            <div className="flex items-center gap-2">
+              <Settings size={18} className="text-blue-400" />
+              <h3 className="text-white font-semibold">参数控制</h3>
+            </div>
+            <button
+              onClick={() => setControlsOpen(false)}
+              className="p-1 hover:bg-gray-700 rounded-lg transition-colors text-gray-400 hover:text-white"
+            >
+              <X size={18} />
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto divide-y divide-gray-700/50">
+            {/* 基本参数 */}
           <div className="p-4">
             <button
               onClick={() => toggleSection('basic')}
@@ -1480,15 +1504,31 @@ function DetailPage() {
               </div>
             )}
           </div>
+
+          <div className="p-4 border-t border-gray-700/50 bg-gray-900/50 shrink-0">
+            <p className="text-gray-400 text-xs text-center">调整参数会重新生成纹理</p>
+          </div>
+          </div>
         </div>
 
-        {/* 底部信息 */}
-        <div className="p-4 border-t border-gray-700/50 bg-gray-900/50">
-          <p className="text-gray-400 text-xs text-center">
-            调整参数会重新生成纹理
-          </p>
-        </div>
-      </div>
+        <button
+          onClick={() => setControlsOpen(!controlsOpen)}
+          className={`
+            fixed z-40 transition-all duration-300 flex items-center justify-center
+            bg-gray-800/80 hover:bg-gray-700 backdrop-blur-md border border-gray-700/50
+            text-gray-300 hover:text-white cursor-pointer
+            shadow-lg
+            md:top-1/2 md:-translate-y-1/2 md:right-0 md:w-8 md:h-24 md:rounded-l-lg
+            md:flex-col md:gap-2 md:text-xs
+            max-md:bottom-4 max-md:left-1/2 max-md:-translate-x-1/2 max-md:w-16 max-md:h-8 max-md:rounded-full
+            max-md:px-4 max-md:py-1 max-md:text-xs
+            ${controlsOpen ? 'max-md:hidden md:translate-x-8' : 'md:translate-x-0'}
+          `}
+        >
+          <Settings size={18} />
+          <span className="md:[writing-mode:vertical-lr] max-md:hidden">参数</span>
+        </button>
+      </>
 
       {/* 信息面板 - 底部 */}
       <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 z-20">

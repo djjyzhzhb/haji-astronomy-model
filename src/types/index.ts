@@ -101,4 +101,6 @@ export interface StoreState {
   setSelectedPlanetId: (id: string | null) => void
   updateDetailPageState: (updates: Partial<DetailPageState>) => void
   updateTextureParams: (updates: Partial<TextureParams>) => void
+  navigateToDetail: (planetId: string) => void
+  navigateToMain: () => void
 }

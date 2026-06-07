@@ -94,9 +94,7 @@ const dayNightVertexShader = `
 
 const dayNightFragmentShader = `
   uniform sampler2D dayTexture;
-  uniform sampler2D nightTexture;
   uniform vec3 sunDirection;
-  uniform float terminatorWidth;
   uniform sampler2D shadowMap;
   uniform vec2 shadowMapSize;
   
@@ -125,22 +123,19 @@ const dayNightFragmentShader = `
   void main() {
     vec3 normal = normalize(vNormal);
     float sunDot = dot(normal, sunDirection);
-    
-    float transition = smoothstep(-terminatorWidth, terminatorWidth, sunDot);
-    
+
     vec4 dayColor = texture2D(dayTexture, vUv);
-    vec4 nightColor = vec4(0.08, 0.06, 0.12, 1.0);
-    
-    
-    vec4 finalColor = mix(nightColor, dayColor, transition);
-    
-    float ambientLight = 0.3 + max(0.0, sunDot) * 0.2;
-    finalColor.rgb *= (0.7 + ambientLight);
-    
+
+    // 暗面始终保留贴图纹理（最低亮度 ~0.45），带轻微蓝调
+    float brightness = smoothstep(-0.2, 0.5, sunDot);
+    brightness = mix(0.45, 1.0, brightness);
+    vec3 darkTint = mix(vec3(0.6, 0.6, 1.0), vec3(1.0), brightness);
+    vec3 finalRGB = dayColor.rgb * brightness * darkTint;
+
     float shadowFactor = getShadow();
-    finalColor.rgb *= shadowFactor;
-    
-    gl_FragColor = finalColor;
+    finalRGB *= shadowFactor;
+
+    gl_FragColor = vec4(finalRGB, 1.0);
   }
 `
 
@@ -276,22 +271,7 @@ function PlanetMesh({ customTexture }: { customTexture?: THREE.Texture | null })
   
   // 轴向倾斜
   const axialTilt = detailPageState.axialTilt
-  
-  // 创建夜间纹理（简化版本）
-  const nightTexture = useMemo(() => {
-    if (!terrain) return null
-    const canvas = document.createElement('canvas')
-    canvas.width = terrain.image.width
-    canvas.height = terrain.image.height
-    const ctx = canvas.getContext('2d')!
-    ctx.fillStyle = '#050510'
-    ctx.fillRect(0, 0, canvas.width, canvas.height)
-    const texture = new THREE.CanvasTexture(canvas)
-    texture.wrapS = THREE.RepeatWrapping
-    texture.wrapT = THREE.ClampToEdgeWrapping
-    return texture
-  }, [terrain])
-  
+
   // 持久化太阳方向引用，每帧用 .set() 更新，避免 useMemo 引用依赖问题
     const sunRef = useRef(new THREE.Vector3(Math.sin(detailPageState.dayTime * Math.PI * 2), 0, Math.cos(detailPageState.dayTime * Math.PI * 2)))
   
@@ -317,13 +297,11 @@ function PlanetMesh({ customTexture }: { customTexture?: THREE.Texture | null })
   // 昼夜材质
   const dayNightMaterial = useMemo(() => {
     const dayTex = customTexture || terrain
-    if (!dayTex || !nightTexture) return null
+    if (!dayTex) return null
     return new THREE.ShaderMaterial({
       uniforms: {
         dayTexture: { value: dayTex },
-        nightTexture: { value: nightTexture },
         sunDirection: { value: sunRef.current },
-        terminatorWidth: { value: 0.15 },
         shadowMap: { value: null },
         shadowMatrix: { value: new THREE.Matrix4() },
         shadowMapSize: { value: new THREE.Vector2(4096, 4096) }
@@ -331,7 +309,7 @@ function PlanetMesh({ customTexture }: { customTexture?: THREE.Texture | null })
       vertexShader: dayNightVertexShader,
       fragmentShader: dayNightFragmentShader
     })
-  }, [terrain, nightTexture, customTexture])
+  }, [terrain, customTexture])
   
   // 云层材质
   const cloudMaterial = useMemo(() => {

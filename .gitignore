@@ -33,3 +33,7 @@ lerna-debug.log*
 /星球贴图.png
 /map.jpg
 /map.png
+
+# Project docs (local only)
+/星球设定.txt
+/行星系统参数报告.md

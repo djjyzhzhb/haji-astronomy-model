@@ -29,5 +29,5 @@ lerna-debug.log*
 .trae
 
 # Raw image in root (only keep the one in public/)
-星球贴图.jpg
-星球贴图.png
+/星球贴图.jpg
+/星球贴图.png

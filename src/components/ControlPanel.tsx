@@ -30,7 +30,7 @@ function ControlPanel() {
   return (
     <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
       {expanded && (
-        <div className="mb-2 bg-gray-900/95 backdrop-blur-sm rounded-xl border border-gray-700/50 p-3 min-w-[400px]">
+        <div className="mb-2 bg-gray-900/95 backdrop-blur-sm rounded-xl border border-gray-700/50 p-3 min-w-0 w-[400px] max-md:w-[calc(100vw-2rem)]">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
               <div className="flex items-center gap-2 text-xs text-gray-400">
@@ -104,7 +104,7 @@ function ControlPanel() {
       )}
 
       {visualExpanded && (
-        <div className="mb-2 bg-gray-900/95 backdrop-blur-sm rounded-xl border border-gray-700/50 p-3 min-w-[400px]">
+        <div className="mb-2 bg-gray-900/95 backdrop-blur-sm rounded-xl border border-gray-700/50 p-3 min-w-0 w-[400px] max-md:w-[calc(100vw-2rem)]">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
               <div className="flex items-center gap-2 text-xs text-gray-400">
@@ -201,7 +201,7 @@ function ControlPanel() {
         </div>
       )}
 
-      <div className="bg-gray-900/95 backdrop-blur-sm rounded-xl border border-gray-700/50 p-2 flex items-center gap-2">
+      <div className="bg-gray-900/95 backdrop-blur-sm rounded-xl border border-gray-700/50 p-2 flex items-center gap-2 max-md:gap-1 max-md:px-1 max-md:py-1">
         <button
           onClick={togglePause}
           className="p-2 hover:bg-gray-700 rounded-lg transition-colors text-white"
@@ -218,7 +218,7 @@ function ControlPanel() {
           <Rewind size={18} />
         </button>
 
-        <div className="flex items-center gap-1 bg-gray-800/50 rounded-lg px-2 py-1">
+        <div className="flex items-center gap-1 bg-gray-800/50 rounded-lg px-2 py-1 max-md:w-12">
           <input
             type="range"
             min="0.1"
@@ -226,7 +226,7 @@ function ControlPanel() {
             step="0.1"
             value={timeScale}
             onChange={(e) => setTimeScale(parseFloat(e.target.value))}
-            className="w-16 accent-blue-500 h-1.5"
+            className="w-16 max-md:w-10 accent-blue-500 h-1.5"
           />
           <span className="text-white text-xs w-8">{timeScale.toFixed(1)}x</span>
         </div>
@@ -257,7 +257,7 @@ function ControlPanel() {
           <Sparkles size={18} />
         </button>
 
-        <div className="w-px h-6 bg-gray-700 mx-1" />
+        <div className="w-px h-6 bg-gray-700 mx-1 max-md:hidden" />
 
         <select
           value={focusBody?.id || ''}
@@ -265,7 +265,7 @@ function ControlPanel() {
             const body = celestialBodies.find(b => b.id === e.target.value)
             setFocusBody(body || null)
           }}
-          className="bg-gray-800/50 text-white px-2 py-1 rounded-lg text-xs border border-gray-700 focus:border-blue-500 focus:outline-none min-w-[100px]"
+          className="bg-gray-800/50 text-white px-2 py-1 rounded-lg text-xs border border-gray-700 focus:border-blue-500 focus:outline-none min-w-[100px] max-md:hidden"
         >
           <option value="">全景</option>
           {celestialBodies.map(body => (
@@ -273,9 +273,9 @@ function ControlPanel() {
           ))}
         </select>
 
-        <div className="w-px h-6 bg-gray-700 mx-1" />
+        <div className="w-px h-6 bg-gray-700 mx-1 max-md:hidden" />
 
-        <div className="flex gap-1">
+        <div className="flex gap-1 max-md:hidden">
           {presets.map((preset) => (
             <button
               key={preset.name}

@@ -11,8 +11,16 @@ interface MapPanelProps {
 function MapPanel({ open, onClose, textureUrl, planetName }: MapPanelProps) {
   const [width, setWidth] = useState(320)
   const [isDragging, setIsDragging] = useState(false)
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768)
   const dragStartX = useRef(0)
   const dragStartWidth = useRef(0)
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)')
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches)
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
+  }, [])
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -48,10 +56,10 @@ function MapPanel({ open, onClose, textureUrl, planetName }: MapPanelProps) {
 
   return (
     <div
-      className={`fixed top-0 right-0 h-full bg-gray-800/90 backdrop-blur-sm rounded-l-xl shadow-2xl border-l border-gray-600 z-40 transition-transform duration-300 ease-in-out ${
+      className={`fixed top-0 right-0 h-full bg-gray-800/90 backdrop-blur-sm rounded-l-xl shadow-2xl border-l border-gray-600 z-40 transition-transform duration-300 ease-in-out max-md:w-full ${
         open ? 'translate-x-0' : 'translate-x-full'
       }`}
-      style={{ width }}
+      style={isMobile ? {} : { width }}
     >
       <div
         className="absolute -left-1 top-0 bottom-0 w-3 cursor-col-resize flex items-center justify-center group z-10"
@@ -61,7 +69,7 @@ function MapPanel({ open, onClose, textureUrl, planetName }: MapPanelProps) {
         <GripVertical size={14} className="absolute text-gray-500 group-hover:text-blue-400 transition-colors opacity-0 group-hover:opacity-100" />
       </div>
 
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700/50">
+      <div className="flex items-center justify-between px-4 py-3 max-md:px-3 border-b border-gray-700/50">
         <h2 className="text-white font-bold text-lg truncate pr-2">{planetName}</h2>
         <button
           onClick={onClose}

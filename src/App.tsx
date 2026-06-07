@@ -116,13 +116,13 @@ function App() {
 
       {/* 信息面板在左边 */}
       {selectedBody && (
-        <div className="absolute top-4 left-4 z-10">
+        <div className="absolute top-4 left-4 z-10 max-md:fixed max-md:top-14 max-md:left-1/2 max-md:-translate-x-1/2 max-md:z-50 max-md:w-[92vw]">
           <InfoPanel />
         </div>
       )}
 
-      {/* 标题移到左上角 */}
-      <div className="absolute top-4 left-4 text-white pointer-events-none">
+      {/* 标题在右边，移动端隐藏 */}
+      <div className="absolute top-4 right-4 max-md:hidden text-white pointer-events-none">
         <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
           天文模型
         </h1>

@@ -791,10 +791,10 @@ function DetailPage() {
       {/* 返回按钮 */}
       <button
         onClick={handleBack}
-        className="absolute top-6 left-6 z-30 flex items-center gap-2 px-4 py-2 bg-gray-800/80 hover:bg-gray-700 text-white rounded-lg transition-colors backdrop-blur-md border border-gray-700/50"
+        className="absolute top-6 left-6 z-30 flex items-center gap-2 px-4 py-2 bg-gray-800/80 hover:bg-gray-700 text-white rounded-lg transition-colors backdrop-blur-md border border-gray-700/50 max-md:top-3 max-md:left-3 max-md:px-3 max-md:py-1.5 max-md:text-xs"
       >
         <ArrowLeft size={20} />
-        返回主页面
+        <span className="max-md:hidden">返回主页面</span>
       </button>
 
       {/* 3D 场景 */}
@@ -823,28 +823,28 @@ function DetailPage() {
       )}
 
       {/* 性能监控面板 */}
-      <div className="absolute top-6 right-6 z-30">
+      <div className="absolute top-6 right-6 z-30 max-md:top-3 max-md:right-3">
         <PerformanceMonitor />
       </div>
 
       <button
         onClick={() => setShowMap(!showMap)}
-        className="absolute top-16 right-6 z-30 flex items-center gap-2 px-3 py-2 bg-gray-800/80 hover:bg-gray-700 text-white rounded-lg transition-colors backdrop-blur-md border border-gray-700/50 text-sm"
+        className="absolute top-16 right-6 z-30 flex items-center gap-2 px-3 py-2 bg-gray-800/80 hover:bg-gray-700 text-white rounded-lg transition-colors backdrop-blur-md border border-gray-700/50 text-sm max-md:top-16 max-md:right-3 max-md:px-2 max-md:py-1.5"
       >
         <Map size={16} />
-        地图
+        <span className="max-md:hidden">地图</span>
       </button>
 
       {/* 页面标题和信息 */}
       <div className="absolute top-6 left-1/2 transform -translate-x-1/2 z-20 text-center">
-        <h1 className="text-3xl font-bold text-white drop-shadow-lg bg-black/20 backdrop-blur-sm px-6 py-2 rounded-full">
+        <h1 className="text-3xl max-md:text-xl font-bold text-white drop-shadow-lg bg-black/20 backdrop-blur-sm px-6 py-2 rounded-full">
           {planet?.name || '精细行星视图'}
         </h1>
-        <p className="text-gray-300 mt-2 text-sm">高分辨率 3D 渲染</p>
+        <p className="text-gray-300 mt-2 text-sm max-md:hidden">高分辨率 3D 渲染</p>
       </div>
 
       {/* 参数控制面板 */}
-      <div className="absolute top-24 right-6 z-20 w-80 bg-gray-800/85 backdrop-blur-md rounded-2xl border border-gray-700/50 shadow-2xl overflow-hidden max-h-[calc(100vh-12rem)] overflow-y-auto">
+      <div className="absolute top-24 right-6 z-20 w-80 max-md:fixed max-md:inset-x-0 max-md:top-auto max-md:bottom-0 max-md:w-full max-md:rounded-2xl max-md:rounded-b-none max-md:max-h-[55vh] max-md:z-40 bg-gray-800/85 backdrop-blur-md rounded-2xl border border-gray-700/50 shadow-2xl overflow-hidden max-h-[calc(100vh-12rem)] overflow-y-auto">
         <div className="p-4 border-b border-gray-700/50 flex items-center gap-2">
           <Settings size={18} className="text-blue-400" />
           <h3 className="text-white font-semibold">参数控制</h3>
@@ -1492,8 +1492,8 @@ function DetailPage() {
 
       {/* 信息面板 - 底部 */}
       <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 z-20">
-        <div className="bg-gray-800/85 backdrop-blur-md rounded-2xl border border-gray-700/50 px-8 py-4 shadow-2xl">
-          <div className="flex items-center gap-8">
+        <div className="bg-gray-800/85 backdrop-blur-md rounded-2xl border border-gray-700/50 px-8 py-4 max-md:px-4 max-md:py-3 shadow-2xl">
+          <div className="flex items-center max-md:flex-wrap max-md:gap-x-4 max-md:gap-y-2 max-md:justify-center">
             <div className="text-center">
               <div className="text-gray-400 text-xs mb-1">类型</div>
               <div className="text-white font-semibold">{planet?.type === 'planet' ? '类地行星' : planet?.type}</div>
@@ -1506,11 +1506,11 @@ function DetailPage() {
               <div className="text-gray-400 text-xs mb-1">质量</div>
               <div className="text-white font-semibold">{planet?.mass || '5.97e24 kg'}</div>
             </div>
-            <div className="text-center">
+            <div className="text-center max-md:hidden">
               <div className="text-gray-400 text-xs mb-1">温度</div>
               <div className="text-white font-semibold">{planet?.temperature || '288 K'}</div>
             </div>
-            <div className="text-center">
+            <div className="text-center max-md:hidden">
               <div className="text-gray-400 text-xs mb-1">质量</div>
               <div className="text-white font-semibold">{detailPageState.qualityLevel === 'low' ? '低' : detailPageState.qualityLevel === 'medium' ? '中' : detailPageState.qualityLevel === 'high' ? '高' : '超高'}</div>
             </div>

@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "homepage": "https://haji-language.github.io/astronomy-model",
+  "homepage": "https://djjyzhzhb.github.io/haji-astronomy-model",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",

@@ -736,7 +736,7 @@ function DetailPage() {
 
   // 使用全局纹理缓存 hook，质量和地形参数变化时自动重新处理
   const customTexture = usePlanetTexture(
-    getIsHabitable(planet?.textureType, planet?.type) ? import.meta.env.BASE_URL + '星球贴图.jpg' : null,
+    getIsHabitable(planet?.textureType, planet?.type) ? import.meta.env.BASE_URL + 'map.jpg' : null,
     detailPageState.qualityLevel,
     detailPageState.textureParams.terrainRoughness,
     detailPageState.textureParams.seed
@@ -817,7 +817,7 @@ function DetailPage() {
         <MapPanel
           open={showMap}
           onClose={() => setShowMap(false)}
-          textureUrl={import.meta.env.BASE_URL + '星球贴图.jpg'}
+          textureUrl={import.meta.env.BASE_URL + 'map.jpg'}
           planetName={planet?.name || '行星'}
         />
       )}

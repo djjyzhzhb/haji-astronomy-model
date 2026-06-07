@@ -35,7 +35,7 @@ function Planet({ body, timeRef, moons }: PlanetProps) {
 
   // 主页用低一档精度，roughness 和 seed 用默认中性值
   const customTexture = usePlanetTexture(
-    getIsHabitable(body.textureType, body.type) ? import.meta.env.BASE_URL + '星球贴图.jpg' : null,
+    getIsHabitable(body.textureType, body.type) ? import.meta.env.BASE_URL + 'map.jpg' : null,
     'low',
     0,
     0

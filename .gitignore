@@ -31,3 +31,5 @@ lerna-debug.log*
 # Raw image in root (only keep the one in public/)
 /星球贴图.jpg
 /星球贴图.png
+/map.jpg
+/map.png

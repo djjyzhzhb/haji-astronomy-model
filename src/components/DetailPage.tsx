@@ -126,10 +126,10 @@ const dayNightFragmentShader = `
 
     vec4 dayColor = texture2D(dayTexture, vUv);
 
-    // 暗面始终保留贴图纹理（最低亮度 ~0.45），带轻微蓝调
-    float brightness = smoothstep(-0.2, 0.5, sunDot);
-    brightness = mix(0.45, 1.0, brightness);
-    vec3 darkTint = mix(vec3(0.6, 0.6, 1.0), vec3(1.0), brightness);
+    // 暗面始终保留贴图纹理（最低亮度 ~0.25），带轻微蓝调
+     float brightness = smoothstep(-0.2, 0.5, sunDot);
+     brightness = mix(0.25, 1.0, brightness);
+     vec3 darkTint = mix(vec3(0.5, 0.5, 0.9), vec3(1.0), brightness);
     vec3 finalRGB = dayColor.rgb * brightness * darkTint;
 
     float shadowFactor = getShadow();

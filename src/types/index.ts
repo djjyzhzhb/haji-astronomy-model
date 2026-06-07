@@ -11,6 +11,8 @@ export interface CelestialBody {
   distance?: number
   orbitSpeed?: number // 保留用于向后兼容
   rotationSpeed?: number
+  rotationPeriodHours?: number // 自转周期（小时）
+  orbitalPeriodDays?: number // 轨道周期（本地日）
   color: string
   emissiveColor?: string
   description: string
@@ -19,14 +21,63 @@ export interface CelestialBody {
   temperature?: string
   hasRing?: boolean
   ringColor?: string
+  ringType?: 'rocky' | 'icy' | 'mixed' // 行星环类型
+  ringAsScale?: boolean // 行星环是否作为刻度表
   parentId?: string
   textureType?: 'none' | 'earth-like' | 'moon-like' | 'mars-like' | 'gas-giant'
   axialTilt?: number // 轴向倾斜角（弧度）
   orbitalElements?: OrbitalElements // 开普勒轨道元素
+  
+  // 行星特殊参数
+  atmosphereThickness?: number // 大气厚度系数
+  greenhouseEffect?: number // 温室效应强度
+  uvResistance?: number // 抗紫外线能力
+  geothermalActivity?: number // 地质活跃度
+  heatReceiptRate?: number // 热接收率
+  heatSupplyRate?: number // 给热量
+  tropicNarrowness?: number // 回归线狭窄度
+  landRatio?: number // 陆地面积比例 (0-1)
+  iceCapExtent?: number // 冰盖范围系数
+  
+  // 卫星特殊参数
+  orbitalPlaneOffset?: number // 轨道平面相对于主卫星的偏移
 }
 
 export type QualityLevel = 'low' | 'medium' | 'high' | 'ultra';
 export type ViewPreset = 'global' | 'equator' | 'north-pole' | 'south-pole' | 'sun-facing';
+
+// 时间系统参数
+export interface TimeSystem {
+  localDayHours: number // 本地日长度（小时）
+  localYearDays: number // 本地年长度（本地日）
+  localMonthDays: number // 本地月长度（本地日）
+  mainMoonPeriodDays: number // 主卫星周期（本地日）
+}
+
+// 历法系统参数
+export interface CalendarSystem {
+  smallMonths: number // 小月数量（41天）
+  largeMonths: number // 大月数量（42天）
+  moonFestivalDays: number // 月相日天数
+  sunFestivalDays: number // 日相日天数
+  leapYearCycle: number // 闰年周期（年）
+  leapSunFestivalDays: number // 闰日相日天数
+}
+
+export interface SurfaceObservationState {
+  latitude: number;
+  longitude: number;
+  isSurfaceView: boolean;
+  fov: number;
+  atmosphereRefraction: boolean;
+  refractionCoefficient: number; // 0.1°~2.0°
+  markerSizeScale: number;       // 0.5x~3.0x
+  showConstellations: boolean;
+  constellationLineWidth: number; // 0.5~5.0
+  showEcliptic: boolean;
+  eclipticLineWidth: number;     // 0.5~5.0
+  showHorizon: boolean;
+}
 
 export interface DetailPageState {
   rotationSpeed: number;
@@ -35,7 +86,9 @@ export interface DetailPageState {
   showAtmosphere: boolean;
   textureParams: TextureParams;
   qualityLevel: QualityLevel;
-  dayTime: number; // 0-1, 0=midnight, 0.5=noon
+  dayTime: number; // 0-1, 0=midnight, 0.5=noon (从 globalTime 派生)
+  yearTime: number; // 0-1, 默认0.25代表春季 (从 globalTime 派生)
+  globalTime: number; // 全局时间（秒），统一驱动所有天体运动
   dayNightCycleSpeed: number;
   atmosphereGlowIntensity: number;
   atmosphereInnerRadius: number;
@@ -52,6 +105,7 @@ export interface DetailPageState {
   ringParticleSize: number;
   ringParticleOpacity: number;
   ringParticleRadiusScale: number;
+  surfaceObservation: SurfaceObservationState;
 }
 
 export interface StoreState {
@@ -77,6 +131,8 @@ export interface StoreState {
   currentPage: PageType
   selectedPlanetId: string | null
   detailPageState: DetailPageState
+  timeSystem: TimeSystem // 时间系统参数
+  calendarSystem: CalendarSystem // 历法系统参数
   setTimeScale: (scale: number) => void
   togglePause: () => void
   toggleOrbits: () => void
@@ -101,6 +157,10 @@ export interface StoreState {
   setSelectedPlanetId: (id: string | null) => void
   updateDetailPageState: (updates: Partial<DetailPageState>) => void
   updateTextureParams: (updates: Partial<TextureParams>) => void
+  setSurfaceObservation: (obs: Partial<SurfaceObservationState>) => void
+  toggleSurfaceView: () => void
   navigateToDetail: (planetId: string) => void
   navigateToMain: () => void
+  updateTimeSystem: (updates: Partial<TimeSystem>) => void
+  updateCalendarSystem: (updates: Partial<CalendarSystem>) => void
 }

@@ -6,14 +6,17 @@ interface MapPanelProps {
   onClose: () => void
   textureUrl: string | null
   planetName: string
+  onSelectPoint?: (lat: number, lon: number) => void
 }
 
-function MapPanel({ open, onClose, textureUrl, planetName }: MapPanelProps) {
+function MapPanel({ open, onClose, textureUrl, planetName, onSelectPoint }: MapPanelProps) {
   const [width, setWidth] = useState(320)
   const [isDragging, setIsDragging] = useState(false)
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768)
+  const [marker, setMarker] = useState<{ x: number; y: number } | null>(null)
   const dragStartX = useRef(0)
   const dragStartWidth = useRef(0)
+  const imgRef = useRef<HTMLImageElement>(null)
 
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 767px)')
@@ -38,6 +41,26 @@ function MapPanel({ open, onClose, textureUrl, planetName }: MapPanelProps) {
   const handleMouseUp = useCallback(() => {
     setIsDragging(false)
   }, [])
+
+  const handleMapClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const img = imgRef.current
+    if (!img) return
+
+    const rect = img.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+    const imgWidth = rect.width
+    const imgHeight = rect.height
+
+    if (x < 0 || x > imgWidth || y < 0 || y > imgHeight) return
+
+    // 地图坐标转为度，再转为弧度存储
+    const lonDeg = (x / imgWidth) * 360 - 180
+    const latDeg = 90 - (y / imgHeight) * 180
+
+    setMarker({ x, y })
+    onSelectPoint?.(latDeg * Math.PI / 180, lonDeg * Math.PI / 180)
+  }, [onSelectPoint])
 
   useEffect(() => {
     if (isDragging) {
@@ -81,11 +104,39 @@ function MapPanel({ open, onClose, textureUrl, planetName }: MapPanelProps) {
 
       <div className="p-4 h-[calc(100%-57px)]">
         {textureUrl ? (
-          <img
-            src={textureUrl}
-            alt={`${planetName} 地图`}
-            className="w-full h-auto rounded-lg object-contain"
-          />
+          <div
+            className="relative cursor-crosshair"
+            onClick={handleMapClick}
+          >
+            <img
+              ref={imgRef}
+              src={textureUrl}
+              alt={`${planetName} 地图`}
+              className="w-full h-auto rounded-lg object-contain"
+              draggable={false}
+            />
+            {marker && (
+              <div
+                className="absolute pointer-events-none"
+                style={{
+                  left: marker.x,
+                  top: marker.y,
+                  transform: 'translate(-50%, -50%)',
+                  width: 20,
+                  height: 20,
+                }}
+              >
+                <div
+                  className="absolute left-1/2 top-0 -translate-x-1/2 w-0.5 h-full bg-red-500"
+                  style={{ boxShadow: '0 0 4px rgba(239, 68, 68, 0.8)' }}
+                />
+                <div
+                  className="absolute top-1/2 left-0 -translate-y-1/2 h-0.5 w-full bg-red-500"
+                  style={{ boxShadow: '0 0 4px rgba(239, 68, 68, 0.8)' }}
+                />
+              </div>
+            )}
+          </div>
         ) : (
           <div className="flex items-center justify-center h-full text-gray-500 text-sm">
             无地图数据

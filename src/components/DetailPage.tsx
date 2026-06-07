@@ -1,7 +1,7 @@
 import { 
   ArrowLeft, Settings, Layers, RotateCw, ZoomIn, Zap, Cloud, Wind, Mountain, Palette, 
   Droplets, Maximize2, Sun, Moon, Sunrise, Cpu, Globe, Eye, EyeOff, Monitor, Maximize,
-  Map, Plus, Minimize2, X
+  Map, Plus, Minimize2, X, Clock
 } from 'lucide-react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { OrbitControls, Stars } from '@react-three/drei'
@@ -9,10 +9,13 @@ import { useStore } from '../store'
 import { getTexturesByType } from '../utils/textureGenerator'
 import PerformanceMonitor from './PerformanceMonitor'
 import MapPanel from './MapPanel'
+import SurfaceView, { SurfaceViewHandle } from './SurfaceView'
 import { usePlanetTexture, getIsHabitable } from '../utils/planetTextureCache'
 import { Suspense, useMemo, useRef, useState, useEffect } from 'react'
 import * as THREE from 'three'
 import { QualityLevel, ViewPreset } from '../types'
+import { calculateDate } from '../utils/calendar'
+import { calculateSunSkyPosition } from '../utils/surfaceCoords'
 
 // 质量设置配置
 const qualitySettings = {
@@ -701,7 +704,9 @@ function DetailPage() {
     detailPageState,
     updateDetailPageState,
     updateTextureParams,
-    navigateToMain
+    navigateToMain,
+    setSurfaceObservation,
+    toggleSurfaceView,
   } = useStore()
   
   const planet = celestialBodies.find(body => body.id === selectedPlanetId)
@@ -718,24 +723,36 @@ function DetailPage() {
   const [isPaused, setIsPaused] = useState(false)
   const [showMap, setShowMap] = useState(false)
   const [controlsOpen, setControlsOpen] = useState(false)
+  const surfaceViewRef = useRef<SurfaceViewHandle>(null)
+  const DAY_IN_SECONDS = 24.15 * 3600
+  const YEAR_IN_DAYS = 426.15
+  const YEAR_IN_SECONDS = YEAR_IN_DAYS * DAY_IN_SECONDS
   const dayNightRef = useRef({
-    dayTime: detailPageState.dayTime,
+    globalTime: detailPageState.globalTime,
     speed: detailPageState.dayNightCycleSpeed
   })
+
+  // 地表视角鼠标交互状态
+  const [isDragging, setIsDragging] = useState(false)
+  const dragStartRef = useRef({ x: 0, y: 0 })
+  const yawPitchRef = useRef({ yaw: 0, pitch: 0 })
   
   // 同步 ref 最新值
   useEffect(() => {
-    dayNightRef.current.dayTime = detailPageState.dayTime
+    dayNightRef.current.globalTime = detailPageState.globalTime
     dayNightRef.current.speed = detailPageState.dayNightCycleSpeed
-  }, [detailPageState.dayTime, detailPageState.dayNightCycleSpeed])
+  }, [detailPageState.globalTime, detailPageState.dayNightCycleSpeed])
 
-  // 昼夜循环自动更新
+  // 昼夜循环自动更新（基于 globalTime）
   useEffect(() => {
     if (isPaused || dayNightRef.current.speed === 0) return
     
     const interval = setInterval(() => {
+      const newGlobalTime = dayNightRef.current.globalTime + dayNightRef.current.speed * 0.01 * DAY_IN_SECONDS
       updateDetailPageState({
-        dayTime: (dayNightRef.current.dayTime + dayNightRef.current.speed * 0.01) % 1
+        globalTime: newGlobalTime,
+        dayTime: (newGlobalTime / DAY_IN_SECONDS) % 1,
+        yearTime: (newGlobalTime / YEAR_IN_SECONDS) % 1
       })
     }, 16)
     
@@ -758,6 +775,85 @@ function DetailPage() {
     updateDetailPageState({ dayTime: time })
   }
 
+  const isSurfaceView = detailPageState.surfaceObservation.isSurfaceView
+
+  // 鼠标事件处理
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (!isSurfaceView) return
+    setIsDragging(true)
+    dragStartRef.current = { x: e.clientX, y: e.clientY }
+  }
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isSurfaceView || !isDragging) return
+    const deltaX = e.clientX - dragStartRef.current.x
+    const deltaY = e.clientY - dragStartRef.current.y
+    dragStartRef.current = { x: e.clientX, y: e.clientY }
+
+    const newYaw = yawPitchRef.current.yaw + deltaX * 0.005
+    const newPitch = Math.max(
+      -Math.PI * 0.44,
+      Math.min(Math.PI * 0.44, yawPitchRef.current.pitch + deltaY * 0.005)
+    )
+
+    yawPitchRef.current = { yaw: newYaw, pitch: newPitch }
+    surfaceViewRef.current?.setYawPitch(newYaw, newPitch)
+  }
+
+  const handleMouseUp = () => {
+    setIsDragging(false)
+  }
+
+  const handleWheel = (e: React.WheelEvent) => {
+    if (!isSurfaceView) return
+    const currentFov = detailPageState.surfaceObservation.fov
+    const newFov = e.deltaY > 0
+      ? Math.min(90, currentFov + 2)
+      : Math.max(30, currentFov - 2)
+    setSurfaceObservation({ fov: newFov })
+  }
+
+  // 触控事件处理
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (!isSurfaceView) return
+    const touch = e.touches[0]
+    setIsDragging(true)
+    dragStartRef.current = { x: touch.clientX, y: touch.clientY }
+  }
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!isSurfaceView || !isDragging) return
+    const touch = e.touches[0]
+    const deltaX = touch.clientX - dragStartRef.current.x
+    const deltaY = touch.clientY - dragStartRef.current.y
+    dragStartRef.current = { x: touch.clientX, y: touch.clientY }
+
+    const newYaw = yawPitchRef.current.yaw + deltaX * 0.005
+    const newPitch = Math.max(
+      -Math.PI * 0.44,
+      Math.min(Math.PI * 0.44, yawPitchRef.current.pitch + deltaY * 0.005)
+    )
+
+    yawPitchRef.current = { yaw: newYaw, pitch: newPitch }
+    surfaceViewRef.current?.setYawPitch(newYaw, newPitch)
+  }
+
+  const handleTouchEnd = () => {
+    setIsDragging(false)
+  }
+
+  // 切换到地表视角时重置相机朝向
+  useEffect(() => {
+    if (isSurfaceView) {
+      yawPitchRef.current = { yaw: 0, pitch: 0 }
+      surfaceViewRef.current?.setYawPitch(0, 0)
+    } else {
+      // 从地表视角切换回轨道视角时清理鼠标状态
+      setIsDragging(false)
+      yawPitchRef.current = { yaw: 0, pitch: 0 }
+    }
+  }, [isSurfaceView])
+
   return (
     <div className="w-full h-full bg-gradient-to-br from-gray-900 via-slate-900 to-gray-900 flex flex-col relative overflow-hidden">
       {/* 返回按钮 */}
@@ -769,20 +865,74 @@ function DetailPage() {
         <span className="max-md:hidden">返回主页面</span>
       </button>
 
+      {/* 地表观测 / 返回轨道 切换按钮 */}
+      <button
+        onClick={toggleSurfaceView}
+        className="absolute top-6 left-44 z-30 flex items-center gap-2 px-4 py-2 bg-gray-800/80 hover:bg-gray-700 text-white rounded-lg transition-colors backdrop-blur-md border border-gray-700/50 max-md:top-3 max-md:left-36 max-md:px-3 max-md:py-1.5 max-md:text-xs"
+      >
+        {detailPageState.surfaceObservation.isSurfaceView ? (
+          <>
+            <Globe size={20} />
+            <span className="max-md:hidden">返回轨道</span>
+          </>
+        ) : (
+          <>
+            <Mountain size={20} />
+            <span className="max-md:hidden">地表观测</span>
+          </>
+        )}
+      </button>
+
       {/* 3D 场景 */}
-      <div className="flex-1 w-full h-full relative">
-        <Canvas
-          camera={{ position: [0, 0, 6], fov: 60 }}
-          gl={{
-            antialias: true,
-            powerPreference: "high-performance",
-          }}
-          shadows
-        >
-          <Suspense fallback={null}>
-            <DetailScene viewPreset={detailPageState.viewPreset} customTexture={customTexture} />
-          </Suspense>
-        </Canvas>
+      <div
+        className="flex-1 w-full h-full relative"
+        onMouseDown={isSurfaceView ? handleMouseDown : undefined}
+        onMouseMove={isSurfaceView ? handleMouseMove : undefined}
+        onMouseUp={isSurfaceView ? handleMouseUp : undefined}
+        onMouseLeave={isSurfaceView ? handleMouseUp : undefined}
+        onWheel={isSurfaceView ? handleWheel : undefined}
+        onTouchStart={isSurfaceView ? handleTouchStart : undefined}
+        onTouchMove={isSurfaceView ? handleTouchMove : undefined}
+        onTouchEnd={isSurfaceView ? handleTouchEnd : undefined}
+        style={{ cursor: isSurfaceView ? (isDragging ? 'grabbing' : 'grab') : 'default' }}
+      >
+        {detailPageState.surfaceObservation.isSurfaceView && planet ? (
+          <SurfaceView
+        ref={surfaceViewRef}
+        planet={planet}
+        dayTime={detailPageState.dayTime}
+        yearProgress={detailPageState.yearTime || 0}
+        globalTime={detailPageState.globalTime}
+        latitude={detailPageState.surfaceObservation.latitude}
+        longitude={detailPageState.surfaceObservation.longitude}
+        fov={detailPageState.surfaceObservation.fov}
+        onFovChange={(fov) => setSurfaceObservation({ fov })}
+        celestialBodies={celestialBodies}
+        showAtmosphere={detailPageState.showAtmosphere}
+        atmosphereColor={detailPageState.textureParams.atmosphereColor}
+        atmosphereRefraction={detailPageState.surfaceObservation.atmosphereRefraction}
+        refractionCoefficient={detailPageState.surfaceObservation.refractionCoefficient}
+        markerSizeScale={detailPageState.surfaceObservation.markerSizeScale}
+        showConstellations={detailPageState.surfaceObservation.showConstellations}
+        constellationLineWidth={detailPageState.surfaceObservation.constellationLineWidth}
+        showEcliptic={detailPageState.surfaceObservation.showEcliptic}
+        eclipticLineWidth={detailPageState.surfaceObservation.eclipticLineWidth}
+        showHorizon={detailPageState.surfaceObservation.showHorizon}
+      />
+        ) : (
+          <Canvas
+            camera={{ position: [0, 0, 6], fov: 60 }}
+            gl={{
+              antialias: true,
+              powerPreference: "high-performance",
+            }}
+            shadows
+          >
+            <Suspense fallback={null}>
+              <DetailScene viewPreset={detailPageState.viewPreset} customTexture={customTexture} />
+            </Suspense>
+          </Canvas>
+        )}
       </div>
 
       {showMap && (
@@ -791,6 +941,9 @@ function DetailPage() {
           onClose={() => setShowMap(false)}
           textureUrl={import.meta.env.BASE_URL + 'map.jpg'}
           planetName={planet?.name || '行星'}
+          onSelectPoint={(lat, lon) => {
+            setSurfaceObservation({ latitude: lat, longitude: lon })
+          }}
         />
       )}
 
@@ -815,7 +968,68 @@ function DetailPage() {
         <p className="text-gray-300 mt-2 text-sm max-md:hidden">高分辨率 3D 渲染</p>
       </div>
 
-      {/* 可伸缩参数面板 */}
+      {/* 天象信息面板 - 仅在地表视图显示 */}
+      {detailPageState.surfaceObservation.isSurfaceView && (
+        <div className="absolute bottom-6 left-6 z-30 bg-black/60 backdrop-blur-md rounded-xl p-4 border border-gray-700/50 max-w-xs">
+          <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
+            <Sun size={16} className="text-yellow-400" />
+            天象信息
+          </h3>
+          
+          {/* 日期 */}
+          <div className="mb-3">
+            <div className="text-gray-400 text-xs mb-1">当前日期</div>
+            <div className="text-white font-mono">
+              第 {calculateDate(detailPageState.yearTime || 0).year} 年 / 第 {calculateDate(detailPageState.yearTime || 0).month} 月 / 第 {calculateDate(detailPageState.yearTime || 0).day} 日
+            </div>
+          </div>
+
+          {/* 太阳位置 */}
+          <div className="mb-3">
+            <div className="text-gray-400 text-xs mb-1">太阳高度角</div>
+            <div className="text-white font-mono">
+              {(calculateSunSkyPosition(
+                detailPageState.surfaceObservation.latitude,
+                detailPageState.surfaceObservation.longitude,
+                detailPageState.dayTime,
+                detailPageState.yearTime || 0,
+                detailPageState.axialTilt
+              ).altitude * 180 / Math.PI).toFixed(1)}°
+            </div>
+          </div>
+
+          {/* 观测位置 */}
+          <div className="mb-3">
+            <div className="text-gray-400 text-xs mb-1">观测位置</div>
+            <div className="text-white font-mono">
+              {(detailPageState.surfaceObservation.latitude * 180 / Math.PI).toFixed(1)}°N,
+              {(detailPageState.surfaceObservation.longitude * 180 / Math.PI).toFixed(1)}°E
+            </div>
+          </div>
+
+          {/* 时间系统 */}
+          <div className="pt-3 border-t border-gray-700/50">
+            <div className="text-gray-400 text-xs mb-2">时间系统</div>
+            <div className="text-white text-sm">
+              <div>本地日: {(detailPageState.dayTime * 24.15).toFixed(1)} 小时</div>
+              <div>本地年进度: {((detailPageState.yearTime || 0) * 100).toFixed(1)}%</div>
+            </div>
+          </div>
+
+          {/* 历法信息 */}
+          <div className="pt-3 border-t border-gray-700/50">
+            <div className="text-gray-400 text-xs mb-2">历法系统</div>
+            <div className="text-white text-sm">
+              <div>小月: 7个 × 41天</div>
+              <div>大月: 3个 × 42天</div>
+              <div>月相周期: 41.3天</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 可伸缩参数面板 - 地表视角下隐藏 */}
+      {!detailPageState.surfaceObservation.isSurfaceView && (
       <>
         {controlsOpen && (
           <div
@@ -1476,6 +1690,158 @@ function DetailPage() {
             )}
           </div>
 
+          {/* 天体参数 */}
+          <div className="p-4">
+            <button
+              onClick={() => toggleSection('celestial')}
+              className="w-full flex items-center justify-between text-white mb-3 hover:text-blue-300 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <Sun size={16} className="text-yellow-400" />
+                <span className="text-sm font-medium">天体参数</span>
+              </div>
+              <span className="text-xs text-gray-400">
+                {expandedSection === 'celestial' ? '收起' : '展开'}
+              </span>
+            </button>
+            {expandedSection === 'celestial' && (
+              <div className="space-y-4">
+                {/* 行星特殊参数 */}
+                <div className="border-b border-gray-700/50 pb-3">
+                  <span className="text-xs text-gray-500 font-medium uppercase">行星特性</span>
+                </div>
+
+                {/* 大气厚度 */}
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-gray-300">
+                    <Cloud size={14} />
+                    <span className="text-sm">大气厚度</span>
+                    <span className="ml-auto text-xs text-gray-400">1.5x</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.5"
+                    max="3"
+                    step="0.1"
+                    value="1.5"
+                    disabled
+                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-not-allowed accent-gray-500 opacity-60"
+                  />
+                </div>
+
+                {/* 温室效应 */}
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-gray-300">
+                    <Sun size={14} />
+                    <span className="text-sm">温室效应</span>
+                    <span className="ml-auto text-xs text-gray-400">1.3x</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.5"
+                    max="3"
+                    step="0.1"
+                    value="1.3"
+                    disabled
+                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-not-allowed accent-gray-500 opacity-60"
+                  />
+                </div>
+
+                {/* 地质活跃度 */}
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-gray-300">
+                    <Mountain size={14} />
+                    <span className="text-sm">地质活跃度</span>
+                    <span className="ml-auto text-xs text-gray-400">1.4x</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.5"
+                    max="3"
+                    step="0.1"
+                    value="1.4"
+                    disabled
+                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-not-allowed accent-gray-500 opacity-60"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 时间系统 */}
+          <div className="p-4">
+            <button
+              onClick={() => toggleSection('time')}
+              className="w-full flex items-center justify-between text-white mb-3 hover:text-blue-300 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <Clock size={16} className="text-blue-400" />
+                <span className="text-sm font-medium">时间系统</span>
+              </div>
+              <span className="text-xs text-gray-400">
+                {expandedSection === 'time' ? '收起' : '展开'}
+              </span>
+            </button>
+            {expandedSection === 'time' && (
+              <div className="space-y-4">
+                {/* 日进度滑块 */}
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-gray-300">
+                    <Sun size={14} />
+                    <span className="text-sm">日进度</span>
+                    <span className="ml-auto text-xs text-gray-400">{(detailPageState.dayTime * 100).toFixed(0)}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    value={detailPageState.dayTime}
+                    onChange={(e) => updateDetailPageState({ dayTime: parseFloat(e.target.value) })}
+                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-yellow-500"
+                  />
+                </div>
+
+                {/* 年进度滑块 */}
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-gray-300">
+                    <RotateCw size={14} />
+                    <span className="text-sm">年进度</span>
+                    <span className="ml-auto text-xs text-gray-400">{((detailPageState.yearTime || 0) * 100).toFixed(0)}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    value={detailPageState.yearTime || 0}
+                    onChange={(e) => updateDetailPageState({ yearTime: parseFloat(e.target.value) })}
+                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                  />
+                </div>
+
+                <div className="pt-2 border-t border-gray-700/50 text-gray-300 text-sm space-y-2">
+                  <div className="flex justify-between">
+                    <span>本地日</span>
+                    <span className="text-yellow-400 font-mono">24.15 小时</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>本地年</span>
+                    <span className="text-yellow-400 font-mono">426.15 天</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>月相周期</span>
+                    <span className="text-yellow-400 font-mono">41.3 天</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>小月/大月</span>
+                    <span className="text-yellow-400 font-mono">7×41 / 3×42</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="p-4 border-t border-gray-700/50 bg-gray-900/50 shrink-0">
             <p className="text-gray-400 text-xs text-center">调整参数会重新生成纹理</p>
           </div>
@@ -1500,6 +1866,7 @@ function DetailPage() {
           <span className="md:[writing-mode:vertical-lr] max-md:hidden">参数</span>
         </button>
       </>
+      )}
 
       {/* 信息面板 - 底部 */}
       <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 z-20">
@@ -1517,14 +1884,30 @@ function DetailPage() {
               <div className="text-gray-400 text-xs mb-1">质量</div>
               <div className="text-white font-semibold">{planet?.mass || '5.97e24 kg'}</div>
             </div>
-            <div className="text-center max-md:hidden">
-              <div className="text-gray-400 text-xs mb-1">温度</div>
-              <div className="text-white font-semibold">{planet?.temperature || '288 K'}</div>
-            </div>
-            <div className="text-center max-md:hidden">
-              <div className="text-gray-400 text-xs mb-1">质量</div>
-              <div className="text-white font-semibold">{detailPageState.qualityLevel === 'low' ? '低' : detailPageState.qualityLevel === 'medium' ? '中' : detailPageState.qualityLevel === 'high' ? '高' : '超高'}</div>
-            </div>
+            {!detailPageState.surfaceObservation.isSurfaceView && (
+              <>
+                <div className="text-center max-md:hidden">
+                  <div className="text-gray-400 text-xs mb-1">温度</div>
+                  <div className="text-white font-semibold">{planet?.temperature || '288 K'}</div>
+                </div>
+                <div className="text-center max-md:hidden">
+                  <div className="text-gray-400 text-xs mb-1">画质</div>
+                  <div className="text-white font-semibold">{detailPageState.qualityLevel === 'low' ? '低' : detailPageState.qualityLevel === 'medium' ? '中' : detailPageState.qualityLevel === 'high' ? '高' : '超高'}</div>
+                </div>
+              </>
+            )}
+            {detailPageState.surfaceObservation.isSurfaceView && (
+              <>
+                <div className="text-center">
+                  <div className="text-gray-400 text-xs mb-1">纬度</div>
+                  <div className="text-white font-semibold">{(detailPageState.surfaceObservation.latitude * 180 / Math.PI).toFixed(2)}°</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-gray-400 text-xs mb-1">经度</div>
+                  <div className="text-white font-semibold">{(detailPageState.surfaceObservation.longitude * 180 / Math.PI).toFixed(2)}°</div>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>

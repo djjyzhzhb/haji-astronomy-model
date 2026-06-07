@@ -106,6 +106,7 @@ const dayNightFragmentShader = `
   varying vec4 vShadowCoord;
   
   float getShadow() {
+    if (shadowMapSize.x < 1.0) return 1.0;
     vec4 sc = vShadowCoord;
     sc.xyz /= sc.w;
     sc.xyz = sc.xyz * 0.5 + 0.5;
@@ -128,21 +129,13 @@ const dayNightFragmentShader = `
     float transition = smoothstep(-terminatorWidth, terminatorWidth, sunDot);
     
     vec4 dayColor = texture2D(dayTexture, vUv);
-    vec4 nightColor = vec4(0.02, 0.02, 0.05, 1.0);
+    vec4 nightColor = vec4(0.08, 0.06, 0.12, 1.0);
     
-    if (sunDot < -0.2) {
-      float lightNoise = fract(sin(vUv.x * 120.0 + vUv.y * 120.0) * 10000.0);
-      if (lightNoise > 0.985) {
-        nightColor = vec4(1.0, 0.9, 0.7, 1.0);
-      } else if (lightNoise > 0.97) {
-        nightColor = vec4(0.8, 0.7, 0.4, 1.0);
-      }
-    }
     
     vec4 finalColor = mix(nightColor, dayColor, transition);
     
-    float ambientLight = 0.2 + max(0.0, sunDot) * 0.3;
-    finalColor.rgb *= (0.6 + ambientLight);
+    float ambientLight = 0.3 + max(0.0, sunDot) * 0.2;
+    finalColor.rgb *= (0.7 + ambientLight);
     
     float shadowFactor = getShadow();
     finalColor.rgb *= shadowFactor;

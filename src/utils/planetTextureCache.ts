@@ -75,16 +75,34 @@ function processTexture(img: HTMLImageElement, quality: string, roughness: numbe
   return tex
 }
 
+function getFastestCachedTexture(url: string): THREE.Texture | null {
+  const prefix = `${url}::`
+  const qualityRank: Record<string, number> = { low: 0, medium: 1, high: 2, ultra: 3 }
+  let bestEntry: TextureCacheEntry | null = null
+  let bestRank = Infinity
+
+  for (const [key, entry] of textureOutputCache) {
+    if (key.startsWith(prefix) && qualityRank[entry.quality] < bestRank) {
+      bestRank = qualityRank[entry.quality]
+      bestEntry = entry
+    }
+  }
+
+  return bestEntry?.texture ?? null
+}
+
 export function usePlanetTexture(
   url: string | null,
   quality: string,
   roughness: number,
   seed: number
 ): THREE.Texture | null {
-  // 同步查缓存，避免首帧闪烁
   const initKey = url ? makeCacheKey(url, quality, roughness, seed) : null
   const initCached = initKey ? textureOutputCache.get(initKey) : null
-  const initTex = initCached ? initCached.texture : null
+  let initTex: THREE.Texture | null = initCached ? initCached.texture : null
+  if (!initTex && url) {
+    initTex = getFastestCachedTexture(url)
+  }
 
   const [texture, setTexture] = useState<THREE.Texture | null>(initTex)
 
@@ -94,7 +112,6 @@ export function usePlanetTexture(
       return
     }
 
-    // 如果图片已缓存且参数相同，跳过（已在 useState 初始值中设置）
     const key = makeCacheKey(url, quality, roughness, seed)
     if (textureOutputCache.has(key)) return
 
@@ -102,6 +119,14 @@ export function usePlanetTexture(
 
     loadImage(url).then((img) => {
       if (cancelled) return
+
+      const quickTex = processTexture(img, 'low', 0, 0)
+      const quickKey = makeCacheKey(url, 'low', 0, 0)
+      if (!textureOutputCache.has(quickKey)) {
+        textureOutputCache.set(quickKey, { texture: quickTex, quality: 'low', roughness: 0, seed: 0 })
+      }
+      setTexture(quickTex)
+
       const key2 = makeCacheKey(url, quality, roughness, seed)
       const cached = textureOutputCache.get(key2)
       if (cached) {

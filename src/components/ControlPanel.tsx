@@ -24,7 +24,7 @@ function ControlPanel() {
   ]
 
   const adjustTimeScale = (delta: number) => {
-    setTimeScale(Math.max(0.1, Math.min(10, timeScale + delta)))
+    setTimeScale(Math.max(0.1, Math.min(100, timeScale + delta)))
   }
 
   return (
@@ -222,7 +222,7 @@ function ControlPanel() {
           <input
             type="range"
             min="0.1"
-            max="10"
+            max="100"
             step="0.1"
             value={timeScale}
             onChange={(e) => setTimeScale(parseFloat(e.target.value))}

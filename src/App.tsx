@@ -10,6 +10,20 @@ import { useStore } from './store'
 import { parseHash } from './utils/router'
 import * as THREE from 'three'
 
+// 移动端竖屏旋转提示
+function PortraitRotateHint() {
+  return (
+    <div className="portrait-overlay select-none">
+      <svg className="rotate-icon" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#64a5ff" strokeWidth="2">
+        <rect x="2" y="3" width="20" height="18" rx="2" />
+        <path d="M12 6v12" />
+      </svg>
+      <p className="text-white text-lg font-semibold">请旋转手机</p>
+      <p className="text-gray-400 text-sm">横屏体验更佳</p>
+    </div>
+  )
+}
+
 function SceneWrapper() {
   const orbitControlsRef = useRef<any>(null)
   const { brightness, backgroundBrightness, backgroundColor, showNebula, distanceScale, sizeScale } = useStore()
@@ -97,11 +111,17 @@ function App() {
   }, [navigateToDetail])
 
   if (currentPage === 'detail') {
-    return <DetailPage />
+    return (
+      <>
+        <PortraitRotateHint />
+        <DetailPage />
+      </>
+    )
   }
 
   return (
     <div className="w-full h-full relative" style={{ backgroundColor }}>
+      <PortraitRotateHint />
       <Canvas
         key={distanceScale}
         camera={{ position: cameraPosition as [number, number, number], fov: 60 }}

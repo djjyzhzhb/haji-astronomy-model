@@ -116,6 +116,55 @@ const skyDomeFragmentShader = `
   }
 `
 
+// 地面着色器 - 昼夜阴影
+const groundVertexShader = `
+  varying vec3 vWorldPosition;
+  void main() {
+    vec4 worldPos = modelMatrix * vec4(position, 1.0);
+    vWorldPosition = worldPos.xyz;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`
+
+const groundFragmentShader = `
+  uniform vec3 sunDirection;
+  uniform float sunAltitude;
+  uniform vec3 groundColor;
+  varying vec3 vWorldPosition;
+
+  void main() {
+    // 太阳在水平面上的投影方向（处理天顶退化情况）
+    vec2 sunHoriz = vec2(sunDirection.x, sunDirection.z);
+    float sunHorizLen = length(sunHoriz);
+    vec2 sunDir2D = sunHorizLen < 0.001 ? vec2(1.0, 0.0) : sunHoriz / sunHorizLen;
+    
+    // 当前像素相对于地面中心的方向
+    vec2 posDir2D = normalize(vec2(vWorldPosition.x, vWorldPosition.z));
+    
+    // 朝向太阳的程度：1 = 正对太阳方向，-1 = 背对太阳
+    float facingSun = dot(posDir2D, sunDir2D);
+    
+    // 昼夜因子
+    float nightThreshold = -0.105;
+    float dayThreshold = 0.105;
+    float dayFactor = smoothstep(nightThreshold, dayThreshold, sunAltitude);
+    
+    // 太阳高度角越高，光照越均匀；越低，阴影梯度越明显
+    float gradientStrength = 1.0 - smoothstep(0.0, 0.5, sunAltitude);
+    float illumination = mix(1.0, smoothstep(-0.7, 0.7, facingSun) * 0.7 + 0.3, gradientStrength);
+    
+    // 日间颜色和夜间颜色
+    vec3 dayColor = groundColor * 0.85;
+    vec3 nightColor = groundColor * 0.02;
+    
+    // 混合日间和夜间，叠加太阳高度角因子
+    float shadowFactor = illumination * dayFactor;
+    vec3 color = mix(nightColor, dayColor, shadowFactor);
+    
+    gl_FragColor = vec4(color, 1.0);
+  }
+`
+
 // 星空粒子
 function StarField({ sunAltitude }: { sunAltitude: number }) {
   const starsRef = useRef<THREE.Points>(null)
@@ -525,18 +574,19 @@ function SkyDome({ sunDirection, sunAltitude, atmosphereColor }: {
 }
 
 // 太阳
-function Sun({ direction, altitude }: { direction: THREE.Vector3; altitude: number }) {
+function Sun({ direction, altitude, starRadius }: { direction: THREE.Vector3; altitude: number; starRadius: number }) {
   // 太阳高度角低于 -6° (0.105 rad) 时不渲染
   if (altitude < -0.105) return null
 
   const sunPosition = direction.clone().multiplyScalar(800)
-  const glowScale = 1.0 + Math.max(0, -altitude) * 2.0
+  const glowScale = 1.0 + Math.max(0, -altitude) * 0.8
+  const bodySize = starRadius * 4
 
   return (
     <Billboard position={sunPosition}>
       {/* 太阳本体 */}
       <mesh>
-        <circleGeometry args={[30, 32]} />
+        <circleGeometry args={[bodySize, 32]} />
         <meshBasicMaterial
           color="#fffde0"
           side={THREE.DoubleSide}
@@ -545,8 +595,8 @@ function Sun({ direction, altitude }: { direction: THREE.Vector3; altitude: numb
         />
       </mesh>
       {/* 内光晕 */}
-      <mesh scale={glowScale * 1.3}>
-        <circleGeometry args={[45, 32]} />
+      <mesh scale={glowScale * 0.8}>
+        <circleGeometry args={[bodySize * 1.15, 32]} />
         <meshBasicMaterial
           color="#ffe8a0"
           transparent
@@ -557,8 +607,8 @@ function Sun({ direction, altitude }: { direction: THREE.Vector3; altitude: numb
         />
       </mesh>
       {/* 外光晕 */}
-      <mesh scale={glowScale * 2.5}>
-        <circleGeometry args={[60, 32]} />
+      <mesh scale={glowScale * 1.2}>
+        <circleGeometry args={[bodySize * 1.45, 32]} />
         <meshBasicMaterial
           color="#ffcc66"
           transparent
@@ -569,48 +619,42 @@ function Sun({ direction, altitude }: { direction: THREE.Vector3; altitude: numb
         />
       </mesh>
       {/* 太阳名称 */}
-      <Html center position={[0, 65, 0]} style={{ pointerEvents: 'none' }}>
+      <Html center position={[0, bodySize * 1.6, 0]} style={{ pointerEvents: 'none' }}>
         <div style={{ color: '#ffe8a0', fontSize: '14px', fontWeight: 'bold', textShadow: '0 0 4px black' }}>太阳</div>
       </Html>
     </Billboard>
   )
 }
 
-// 地面
-function Ground({ planet, sunAltitude }: { planet: CelestialBody; sunAltitude: number }) {
-  const textureRef = useRef<THREE.Texture | null>(null)
+// 地面 - 昼夜阴影
+function Ground({ planet, sunDirection, sunAltitude }: { planet: CelestialBody; sunDirection: THREE.Vector3; sunAltitude: number }) {
+  const materialRef = useRef<THREE.ShaderMaterial>(null)
 
-  // 昼夜因子：白天 1，夜晚 0
-  const nightThreshold = -0.105
-  const dayThreshold = 0.105
-  const dayFactor = Math.max(0, Math.min(1, (sunAltitude - nightThreshold) / (dayThreshold - nightThreshold)))
+  // 每帧更新 sunDirection 和 sunAltitude
+  useFrame(() => {
+    if (materialRef.current) {
+      materialRef.current.uniforms.sunDirection.value.copy(sunDirection)
+      materialRef.current.uniforms.sunAltitude.value = sunAltitude
+    }
+  })
 
-  // 如果有纹理URL，尝试加载
-  const textureUrl = planet.textureType && planet.textureType !== 'none'
-    ? undefined
-    : null
+  const uniforms = useMemo(() => ({
+    sunDirection: { value: sunDirection.clone() },
+    sunAltitude: { value: sunAltitude },
+    groundColor: { value: new THREE.Color(planet.color) }
+  }), [planet.color])
 
   return (
     <mesh rotation={[-Math.PI / 2 + 0.02, 0, 0]} position={[0, -0.5, 0]}>
       <planeGeometry args={[200, 200, 32, 32]} />
-      {textureUrl ? (
-        <meshStandardMaterial
-          map={textureRef.current || undefined}
-          color={planet.color}
-          roughness={0.9}
-          metalness={0.0}
-          emissive={new THREE.Color(planet.color).multiplyScalar(0.1 * dayFactor)}
-          emissiveIntensity={dayFactor}
-        />
-      ) : (
-        <meshStandardMaterial
-          color={planet.color}
-          roughness={0.9}
-          metalness={0.0}
-          emissive={new THREE.Color(planet.color).multiplyScalar(0.1 * dayFactor)}
-          emissiveIntensity={dayFactor}
-        />
-      )}
+      <shaderMaterial
+        ref={materialRef}
+        uniforms={uniforms}
+        vertexShader={groundVertexShader}
+        fragmentShader={groundFragmentShader}
+        side={THREE.DoubleSide}
+        depthWrite={false}
+      />
     </mesh>
   )
 }
@@ -760,18 +804,20 @@ function CelestialMarkers({
       let glowScale: number
       let displayColor: string
 
+      // === 统一视大小：apparentSize ∝ radius / distance ===
+      // K=80 校准点：大卫星 (radius=0.75, dist≈6.0) → 视觉大小 10
+      const apparentSize = (body.radius / distanceToObserver) * 80
+
       if (body.parentId === observerPlanet.id) {
         // 卫星：近距离，较大较亮
-        baseSize = Math.max(3, Math.sqrt(body.radius) * 5)
+        baseSize = Math.max(2.5, Math.min(apparentSize, 14))
         opacity = 0.95
         glowOpacity = 0.4
         glowScale = 2.5
         displayColor = '#e8e8e8'
       } else {
         // === 外行星：距离相关渲染 ===
-        // 视大小 ∝ radius / distance
-        const apparentSize = (body.radius / distanceToObserver) * 600
-        baseSize = Math.max(2.5, Math.min(apparentSize, 12))
+        baseSize = Math.max(2.5, Math.min(apparentSize, 15))
         
         // 计算相位角：太阳-观测者-行星 之间的角度
         // cos(phaseAngle) = (sunDir · planetDir)，其中 sunDir = normalize(sunPos - observerPos)
@@ -1070,7 +1116,7 @@ function SurfaceViewScene({
       />
 
       {/* 太阳 */}
-      <Sun direction={sunDirection} altitude={sunAltitude} />
+      <Sun direction={sunDirection} altitude={sunAltitude} starRadius={celestialBodies.find(b => b.type === 'star')?.radius ?? 8.0} />
 
       {/* 天体标记 */}
       <CelestialMarkers
@@ -1089,7 +1135,7 @@ function SurfaceViewScene({
       <PlanetRingArc observerPlanet={planet} latitude={latitude} />
 
       {/* 地面 */}
-      <Ground planet={planet} sunAltitude={sunAltitude} />
+      <Ground planet={planet} sunDirection={sunDirection} sunAltitude={sunAltitude} />
 
       {/* 大气辉光 */}
       <AtmosphereGlow

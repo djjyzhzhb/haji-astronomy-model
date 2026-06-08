@@ -83,6 +83,7 @@ export interface DetailPageState {
   rotationSpeed: number;
   planetScale: number;
   showClouds: boolean;
+  cloudSpeed: number;
   showAtmosphere: boolean;
   textureParams: TextureParams;
   qualityLevel: QualityLevel;

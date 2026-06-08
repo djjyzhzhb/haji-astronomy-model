@@ -28,7 +28,7 @@ const defaultCelestialBodies: CelestialBody[] = [
     id: 'star-1',
     name: '主恒星',
     type: 'star',
-    radius: 4.5, // 设定推导：比太阳略小（热接收率更低暗示恒星较冷/较小）
+    radius: 8.0, // 设定推导：比太阳略小，1单位=6000km，恒星压缩至可视化比例
     rotationSpeed: 0.01,
     color: '#ffd080', // 合理推测：比太阳稍冷，色温偏暖黄
     emissiveColor: '#ffaa00',
@@ -41,7 +41,7 @@ const defaultCelestialBodies: CelestialBody[] = [
     id: 'planet-1',
     name: '宜居行星',
     type: 'planet',
-    radius: 1.88, // 设定推导：略小于地球（地球基准 2.0，取 0.94 倍）
+    radius: 2.0, // 设定推导：略小于地球（12000km/6000=2.0）
     distance: 22, // 合理推测：体现"热接收率更低"，比当前 20 稍远
     rotationSpeed: 0.02,
     rotationPeriodHours: 24.15, // 设定明确：本地日 24.15 地球时
@@ -72,7 +72,7 @@ const defaultCelestialBodies: CelestialBody[] = [
     id: 'moon-1',
     name: '大卫星',
     type: 'moon',
-    radius: 0.95, // 设定推导：直径更大（月球基准 0.75，取 1.27 倍）
+    radius: 0.75, // 设定推导：直径更大（4400km/6000≈0.73）
     distance: 6.0, // 设定推导：距离略远（体现"距离略远"）
     rotationSpeed: 0.03,
     orbitalPeriodDays: 41.3, // 设定明确：绕行周期 41.3 本地日
@@ -126,7 +126,7 @@ const defaultCelestialBodies: CelestialBody[] = [
     id: 'planet-2',
     name: '红色行星',
     type: 'planet',
-    radius: 1.5, // 无依据（占位）：设定文件未提及，仅用于丰富场景
+    radius: 1.6, // 合理推测：红色行星（10000km/6000≈1.67）
     distance: 35, // 无依据（占位）
     rotationSpeed: 0.018,
     color: '#cd5c5c',
@@ -142,7 +142,7 @@ const defaultCelestialBodies: CelestialBody[] = [
     id: 'planet-3',
     name: '气态巨星',
     type: 'planet',
-    radius: 4, // 无依据（占位）：设定文件未提及，仅用于丰富场景
+    radius: 6.0, // 合理推测：气态巨星（40000km/6000≈6.67，取整）
     distance: 60, // 无依据（占位）
     rotationSpeed: 0.04,
     color: '#daa520',
@@ -162,12 +162,13 @@ const defaultDetailPageState: DetailPageState = {
   rotationSpeed: 0.2,
   planetScale: 1,
   showClouds: true,
+  cloudSpeed: 0.3,
   showAtmosphere: true,
   textureParams: {
     resolution: '2048',
     terrainRoughness: 0.5,
     cloudCoverage: 0.4,
-    cloudSpeed: 0.2,
+    cloudOpacity: 0.7,
     atmosphereDensity: 0.6,
     atmosphereColor: '#64a5ff',
     seed: 42

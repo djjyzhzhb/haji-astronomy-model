@@ -4,7 +4,7 @@ export interface TextureParams {
   resolution: '1024' | '2048' | '4096'
   terrainRoughness: number
   cloudCoverage: number
-  cloudSpeed: number
+  cloudOpacity: number
   atmosphereDensity: number
   atmosphereColor: string
   seed: number
@@ -14,7 +14,7 @@ const defaultParams: TextureParams = {
   resolution: '2048',
   terrainRoughness: 0.5,
   cloudCoverage: 0.4,
-  cloudSpeed: 0.2,
+  cloudOpacity: 0.7,
   atmosphereDensity: 0.6,
   atmosphereColor: '#64a5ff',
   seed: 42
@@ -42,6 +42,47 @@ function createCanvasTexture(
   texture.anisotropy = 8
   texture.needsUpdate = true
   return texture
+}
+
+// 3D 噪声函数用于云纹理生成
+function hash3D(x: number, y: number, z: number): number {
+  let h = x * 374761393 + y * 668265263 + z * 144067249
+  h = (h ^ (h >> 13)) * 1274126177
+  return (h ^ (h >> 16)) / 2147483648 + 0.5
+}
+
+function smoothNoise3D(x: number, y: number, z: number): number {
+  const ix = Math.floor(x), iy = Math.floor(y), iz = Math.floor(z)
+  const fx = x - ix, fy = y - iy, fz = z - iz
+  const sx = fx * fx * (3 - 2 * fx)
+  const sy = fy * fy * (3 - 2 * fy)
+  const sz = fz * fz * (3 - 2 * fz)
+  const n000 = hash3D(ix, iy, iz)
+  const n100 = hash3D(ix + 1, iy, iz)
+  const n010 = hash3D(ix, iy + 1, iz)
+  const n110 = hash3D(ix + 1, iy + 1, iz)
+  const n001 = hash3D(ix, iy, iz + 1)
+  const n101 = hash3D(ix + 1, iy, iz + 1)
+  const n011 = hash3D(ix, iy + 1, iz + 1)
+  const n111 = hash3D(ix + 1, iy + 1, iz + 1)
+  const nx00 = n000 + (n100 - n000) * sx
+  const nx10 = n010 + (n110 - n010) * sx
+  const nx01 = n001 + (n101 - n001) * sx
+  const nx11 = n011 + (n111 - n011) * sx
+  const nxy0 = nx00 + (nx10 - nx00) * sy
+  const nxy1 = nx01 + (nx11 - nx01) * sy
+  return nxy0 + (nxy1 - nxy0) * sz
+}
+
+function fbm3D(x: number, y: number, z: number, octaves: number = 6): number {
+  let value = 0, amplitude = 1, frequency = 1, maxValue = 0
+  for (let i = 0; i < octaves; i++) {
+    value += amplitude * smoothNoise3D(x * frequency, y * frequency, z * frequency)
+    maxValue += amplitude
+    amplitude *= 0.5
+    frequency *= 2.5
+  }
+  return value / maxValue
 }
 
 export function generateTerrainTexture(params: Partial<TextureParams> = {}): THREE.Texture {
@@ -110,35 +151,52 @@ export function generateCloudTexture(params: Partial<TextureParams> = {}): THREE
   const width = resolution * 2
   const height = resolution
   const coverage = mergedParams.cloudCoverage
-  const random = seededRandom(mergedParams.seed)
+  const opacity = mergedParams.cloudOpacity
+  const seed = mergedParams.seed
 
   return createCanvasTexture(width, height, (ctx, w, h) => {
-    // 完全透明背景
     ctx.clearRect(0, 0, w, h)
+    const imageData = ctx.createImageData(w, h)
 
-    if (coverage > 0) {
-      // 根据覆盖度添加云朵
-      const cloudDensity = Math.floor(coverage * 50)
-      const cloudSize = Math.max(20, 200 - coverage * 100)
+    for (let py = 0; py < h; py++) {
+      const lat = (py / h) * Math.PI
+      const latFactor = Math.sin(lat)
+      // 补偿等距矩形投影在两极的水平拉伸：高纬度增加水平采样频率
+      const hScale = 2.5 / Math.max(0.12, latFactor)
 
-      for (let i = 0; i < cloudDensity; i++) {
-        const x = random() * w
-        const y = random() * h
-        const radius = cloudSize * (0.5 + random() * 0.5)
-        
-        // 创建亮白色云朵
-        const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius)
-        gradient.addColorStop(0, `rgba(255, 255, 255, ${Math.min(0.9, 0.6 * coverage)})`)
-        gradient.addColorStop(0.4, `rgba(255, 255, 255, ${Math.min(0.7, 0.4 * coverage)})`)
-        gradient.addColorStop(0.7, `rgba(255, 255, 255, ${Math.min(0.4, 0.2 * coverage)})`)
-        gradient.addColorStop(1, 'rgba(255, 255, 255, 0)')
-        
-        ctx.fillStyle = gradient
-        ctx.beginPath()
-        ctx.arc(x, y, radius, 0, Math.PI * 2)
-        ctx.fill()
+      for (let px = 0; px < w; px++) {
+        const lon = (px / w) * Math.PI * 2
+
+        const nx = Math.cos(lon) * hScale
+        const ny = lat * 0.9
+        const nz = Math.sin(lon) * hScale + seed * 0.1
+
+        // 域扭曲：用低频噪声扰动采样坐标，产生更破碎不规则的云块边缘
+        const warp = 0.6
+        const wx = smoothNoise3D(nx * 0.4 + 1.7, ny * 0.4, nz * 0.4) * warp
+        const wy = smoothNoise3D(nx * 0.4, ny * 0.4 + 3.1, nz * 0.4) * warp
+        const wz = smoothNoise3D(nx * 0.4, ny * 0.4, nz * 0.4 + 5.3) * warp
+
+        const noiseVal = fbm3D(nx + wx, ny + wy, nz + wz, 6)
+
+        // 噪声值约在 [-0.3, 1.4] 分布，threshold 在 1.4(coverage=0) ~ 0.05(coverage=1) 之间
+        const threshold = 1.4 - coverage * 1.35
+        let alpha = 0
+        if (noiseVal > threshold) {
+          alpha = Math.min(1, (noiseVal - threshold) / (1.4 - threshold))
+          // 用 opacity 控制云体厚度，不加额外锐化截断
+          alpha *= opacity
+          alpha *= latFactor
+        }
+
+        const idx = (py * w + px) * 4
+        imageData.data[idx] = 255
+        imageData.data[idx + 1] = 255
+        imageData.data[idx + 2] = 255
+        imageData.data[idx + 3] = Math.floor(alpha * 255)
       }
     }
+    ctx.putImageData(imageData, 0, 0)
   })
 }
 

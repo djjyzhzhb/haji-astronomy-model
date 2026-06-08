@@ -17,6 +17,9 @@ import { QualityLevel, ViewPreset } from '../types'
 import { calculateDate } from '../utils/calendar'
 import { calculateSunSkyPosition } from '../utils/surfaceCoords'
 
+// 时间常量
+const DAY_IN_SECONDS = 24.15 * 3600
+
 // 质量设置配置
 const qualitySettings = {
   low: { segments: 64, textureRes: '1024' as const, shadow: false },
@@ -223,6 +226,10 @@ function PlanetMesh({ customTexture }: { customTexture?: THREE.Texture | null })
   const { selectedPlanetId, celestialBodies, detailPageState, updateDetailPageState } = useStore()
   const { scene } = useThree()
   const lightRef = useRef<THREE.DirectionalLight | null>(null)
+  const planetRotRef = useRef(0)
+  const cloudRotRef = useRef(0)
+  const ringRotRef = useRef(0)
+  const lastGlobalTimeRef = useRef(detailPageState.globalTime)
   
   const planet = celestialBodies.find(body => body.id === selectedPlanetId)
   const textureType = planet?.textureType || 'earth-like'
@@ -244,6 +251,7 @@ function PlanetMesh({ customTexture }: { customTexture?: THREE.Texture | null })
   const { 
     terrainRoughness, 
     cloudCoverage, 
+    cloudOpacity,
     atmosphereDensity, 
     atmosphereColor, 
     seed 
@@ -253,6 +261,7 @@ function PlanetMesh({ customTexture }: { customTexture?: THREE.Texture | null })
     const params = { 
       terrainRoughness, 
       cloudCoverage, 
+      cloudOpacity,
       atmosphereDensity, 
       atmosphereColor, 
       seed,
@@ -263,6 +272,7 @@ function PlanetMesh({ customTexture }: { customTexture?: THREE.Texture | null })
     textureType, 
     terrainRoughness, 
     cloudCoverage, 
+    cloudOpacity,
     atmosphereDensity, 
     atmosphereColor, 
     seed, 
@@ -321,7 +331,7 @@ function PlanetMesh({ customTexture }: { customTexture?: THREE.Texture | null })
       uniforms: {
         cloudTexture: { value: clouds },
         sunDirection: { value: sunRef.current },
-        cloudOpacity: { value: 0.9 }
+        cloudOpacity: { value: 1.0 }
       },
       vertexShader: cloudVertexShader,
       fragmentShader: cloudFragmentShader,
@@ -451,24 +461,31 @@ function PlanetMesh({ customTexture }: { customTexture?: THREE.Texture | null })
     ringMatMid.uniforms.sunDirection.value = sunRef.current
     ringMatOuter.uniforms.sunDirection.value = sunRef.current
     
-    // 行星自转
+    // 行星自转 - 基于 globalTime 差量累积，避免调速时跳变
+    const { globalTime, rotationSpeed, cloudSpeed } = detailPageState
+    let dt = globalTime - lastGlobalTimeRef.current
+    // 处理时间重置 / 大幅跳变（如拖动时间滑块），允许跳变但限制单帧上限
+    if (dt < 0) dt = 0
+    if (dt > DAY_IN_SECONDS * 0.5) dt = DAY_IN_SECONDS * 0.5
+    lastGlobalTimeRef.current = globalTime
+    
+    const radPerSec = 2 * Math.PI / DAY_IN_SECONDS
+    planetRotRef.current += dt * rotationSpeed * radPerSec
+    cloudRotRef.current += dt * cloudSpeed * radPerSec
+    ringRotRef.current += dt * rotationSpeed * radPerSec
+    
     if (meshRef.current) {
-      meshRef.current.rotation.y += delta * detailPageState.rotationSpeed
+      meshRef.current.rotation.y = planetRotRef.current % (Math.PI * 2)
     }
     if (cloudsRef.current && detailPageState.showClouds) {
-      cloudsRef.current.rotation.y += delta * detailPageState.rotationSpeed * 1.1
+      cloudsRef.current.rotation.y = cloudRotRef.current % (Math.PI * 2)
     }
     // 行星环跟着星球自转而旋转
     if (ringGroupRef.current && planet?.hasRing && detailPageState.showRing) {
-      ringGroupRef.current.children[0].rotation.z += delta * detailPageState.rotationSpeed
+      ringGroupRef.current.children[0].rotation.z = ringRotRef.current % (Math.PI * 2)
     }
     if (ringParticlesGroupRef.current && planet?.hasRing && detailPageState.showRingParticles) {
-      ringParticlesGroupRef.current.children[0].rotation.z += delta * detailPageState.rotationSpeed
-    }
-    
-    // 昼夜循环（如果启用）
-    if (detailPageState.dayNightCycleSpeed > 0) {
-      // 通过 store 更新
+      ringParticlesGroupRef.current.children[0].rotation.z = ringRotRef.current % (Math.PI * 2)
     }
   })
   
@@ -724,7 +741,6 @@ function DetailPage() {
   const [showMap, setShowMap] = useState(false)
   const [controlsOpen, setControlsOpen] = useState(false)
   const surfaceViewRef = useRef<SurfaceViewHandle>(null)
-  const DAY_IN_SECONDS = 24.15 * 3600
   const YEAR_IN_DAYS = 426.15
   const YEAR_IN_SECONDS = YEAR_IN_DAYS * DAY_IN_SECONDS
   const dayNightRef = useRef({
@@ -856,34 +872,64 @@ function DetailPage() {
 
   return (
     <div className="w-full h-full bg-gradient-to-br from-gray-900 via-slate-900 to-gray-900 flex flex-col relative overflow-hidden">
-      {/* 返回按钮 */}
-      <button
-        onClick={handleBack}
-        className="absolute top-6 left-6 z-30 flex items-center gap-2 px-4 py-2 bg-gray-800/80 hover:bg-gray-700 text-white rounded-lg transition-colors backdrop-blur-md border border-gray-700/50 max-md:top-3 max-md:left-3 max-md:px-3 max-md:py-1.5 max-md:text-xs"
-      >
-        <ArrowLeft size={20} />
-        <span className="max-md:hidden">返回主页面</span>
-      </button>
+      {/* ===== 移动端竖屏旋转提示 ===== */}
+      <div className="portrait-overlay select-none">
+        <svg className="rotate-icon" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#64a5ff" strokeWidth="2">
+          <rect x="2" y="3" width="20" height="18" rx="2" />
+          <path d="M12 6v12" />
+        </svg>
+        <p className="text-white text-lg font-semibold">请旋转手机</p>
+        <p className="text-gray-400 text-sm">横屏体验更佳</p>
+      </div>
 
-      {/* 地表观测 / 返回轨道 切换按钮 */}
-      <button
-        onClick={toggleSurfaceView}
-        className="absolute top-6 left-44 z-30 flex items-center gap-2 px-4 py-2 bg-gray-800/80 hover:bg-gray-700 text-white rounded-lg transition-colors backdrop-blur-md border border-gray-700/50 max-md:top-3 max-md:left-36 max-md:px-3 max-md:py-1.5 max-md:text-xs"
-      >
-        {detailPageState.surfaceObservation.isSurfaceView ? (
-          <>
-            <Globe size={20} />
-            <span className="max-md:hidden">返回轨道</span>
-          </>
-        ) : (
-          <>
-            <Mountain size={20} />
-            <span className="max-md:hidden">地表观测</span>
-          </>
-        )}
-      </button>
+      {/* ===== 顶部控制栏 ===== */}
+      <div className="absolute top-0 inset-x-0 z-30 flex items-center justify-between px-2 py-1.5
+        landscape-mobile:px-1 landscape-mobile:py-1
+        bg-gradient-to-b from-black/60 to-transparent">
+        <div className="flex items-center gap-1.5 landscape-mobile:gap-1">
+          {/* 返回按钮 */}
+          <button
+            onClick={handleBack}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-800/80 hover:bg-gray-700 text-white rounded-lg transition-colors backdrop-blur-md border border-gray-700/50 text-sm
+              landscape-mobile:px-2 landscape-mobile:py-1 landscape-mobile:text-xs landscape-mobile:gap-1"
+          >
+            <ArrowLeft size={18} className="landscape-mobile:w-4 landscape-mobile:h-4" />
+            <span className="max-md:hidden">返回</span>
+          </button>
 
-      {/* 3D 场景 */}
+          {/* 地表/轨道切换 */}
+          <button
+            onClick={toggleSurfaceView}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-800/80 hover:bg-gray-700 text-white rounded-lg transition-colors backdrop-blur-md border border-gray-700/50 text-sm
+              landscape-mobile:px-2 landscape-mobile:py-1 landscape-mobile:text-xs landscape-mobile:gap-1"
+          >
+            {isSurfaceView ? <Globe size={18} className="landscape-mobile:w-4 landscape-mobile:h-4" /> : <Mountain size={18} className="landscape-mobile:w-4 landscape-mobile:h-4" />}
+            <span className="max-md:hidden">{isSurfaceView ? '轨道' : '地表'}</span>
+          </button>
+
+          {/* 地图按钮 */}
+          <button
+            onClick={() => setShowMap(!showMap)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-800/80 hover:bg-gray-700 text-white rounded-lg transition-colors backdrop-blur-md border border-gray-700/50 text-sm
+              landscape-mobile:px-2 landscape-mobile:py-1 landscape-mobile:text-xs landscape-mobile:gap-1"
+          >
+            <Map size={18} className="landscape-mobile:w-4 landscape-mobile:h-4" />
+            <span className="max-md:hidden">地图</span>
+          </button>
+        </div>
+
+        {/* 页面标题 */}
+        <h1 className="text-lg font-bold text-white drop-shadow-lg max-md:text-sm max-md:px-2 landscape-mobile:text-xs">
+          {planet?.name || '精细行星视图'}
+        </h1>
+
+        <div className="flex items-center gap-1.5 landscape-mobile:gap-1">
+          {/* 性能监控 */}
+          <PerformanceMonitor />
+        </div>
+      </div>
+
+      {/* ===== 3D 场景 ===== */}
       <div
         className="flex-1 w-full h-full relative"
         onMouseDown={isSurfaceView ? handleMouseDown : undefined}
@@ -896,7 +942,7 @@ function DetailPage() {
         onTouchEnd={isSurfaceView ? handleTouchEnd : undefined}
         style={{ cursor: isSurfaceView ? (isDragging ? 'grabbing' : 'grab') : 'default' }}
       >
-        {detailPageState.surfaceObservation.isSurfaceView && planet ? (
+        {isSurfaceView && planet ? (
           <SurfaceView
         ref={surfaceViewRef}
         planet={planet}
@@ -944,92 +990,77 @@ function DetailPage() {
           onSelectPoint={(lat, lon) => {
             setSurfaceObservation({ latitude: lat, longitude: lon })
           }}
+          dayTime={detailPageState.dayTime}
+          yearProgress={detailPageState.yearTime}
+          axialTilt={detailPageState.axialTilt}
         />
       )}
 
-      {/* 性能监控面板 */}
-      <div className="absolute top-6 right-6 z-30 max-md:top-3 max-md:right-3">
-        <PerformanceMonitor />
-      </div>
-
-      <button
-        onClick={() => setShowMap(!showMap)}
-        className="absolute top-16 right-6 z-30 flex items-center gap-2 px-3 py-2 bg-gray-800/80 hover:bg-gray-700 text-white rounded-lg transition-colors backdrop-blur-md border border-gray-700/50 text-sm max-md:top-16 max-md:right-3 max-md:px-2 max-md:py-1.5"
-      >
-        <Map size={16} />
-        <span className="max-md:hidden">地图</span>
-      </button>
-
-      {/* 页面标题和信息 */}
-      <div className="absolute top-6 left-1/2 transform -translate-x-1/2 z-20 text-center">
-        <h1 className="text-3xl max-md:text-xl font-bold text-white drop-shadow-lg bg-black/20 backdrop-blur-sm px-6 py-2 rounded-full">
-          {planet?.name || '精细行星视图'}
-        </h1>
-        <p className="text-gray-300 mt-2 text-sm max-md:hidden">高分辨率 3D 渲染</p>
-      </div>
-
-      {/* 天象信息面板 - 仅在地表视图显示 */}
-      {detailPageState.surfaceObservation.isSurfaceView && (
-        <div className="absolute bottom-6 left-6 z-30 bg-black/60 backdrop-blur-md rounded-xl p-4 border border-gray-700/50 max-w-xs">
-          <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
-            <Sun size={16} className="text-yellow-400" />
-            天象信息
-          </h3>
-          
-          {/* 日期 */}
-          <div className="mb-3">
-            <div className="text-gray-400 text-xs mb-1">当前日期</div>
-            <div className="text-white font-mono">
-              第 {calculateDate(detailPageState.yearTime || 0).year} 年 / 第 {calculateDate(detailPageState.yearTime || 0).month} 月 / 第 {calculateDate(detailPageState.yearTime || 0).day} 日
-            </div>
+      {/* ===== 地表视角天象信息面板 ===== */}
+      {isSurfaceView && (
+        <div className="absolute bottom-2 left-2 z-30 bg-black/70 backdrop-blur-md rounded-lg p-2 border border-gray-700/50 max-w-[200px]
+          landscape-mobile:max-w-[160px] landscape-mobile:p-1.5 landscape-mobile:text-xs">
+          <div className="text-gray-400 text-[10px] landscape-mobile:text-[8px]">当前日期</div>
+          <div className="text-white font-mono text-xs landscape-mobile:text-[10px]">
+            第{calculateDate(detailPageState.yearTime || 0).year}年/{calculateDate(detailPageState.yearTime || 0).month}月/{calculateDate(detailPageState.yearTime || 0).day}日
           </div>
-
-          {/* 太阳位置 */}
-          <div className="mb-3">
-            <div className="text-gray-400 text-xs mb-1">太阳高度角</div>
-            <div className="text-white font-mono">
-              {(calculateSunSkyPosition(
-                detailPageState.surfaceObservation.latitude,
-                detailPageState.surfaceObservation.longitude,
-                detailPageState.dayTime,
-                detailPageState.yearTime || 0,
-                detailPageState.axialTilt
-              ).altitude * 180 / Math.PI).toFixed(1)}°
-            </div>
+          <div className="text-gray-400 text-[10px] mt-1 landscape-mobile:text-[8px] landscape-mobile:mt-0.5">太阳高度角</div>
+          <div className="text-white font-mono text-xs landscape-mobile:text-[10px]">
+            {(calculateSunSkyPosition(
+              detailPageState.surfaceObservation.latitude,
+              detailPageState.surfaceObservation.longitude,
+              detailPageState.dayTime,
+              detailPageState.yearTime || 0,
+              detailPageState.axialTilt
+            ).altitude * 180 / Math.PI).toFixed(1)}°
           </div>
-
-          {/* 观测位置 */}
-          <div className="mb-3">
-            <div className="text-gray-400 text-xs mb-1">观测位置</div>
-            <div className="text-white font-mono">
-              {(detailPageState.surfaceObservation.latitude * 180 / Math.PI).toFixed(1)}°N,
-              {(detailPageState.surfaceObservation.longitude * 180 / Math.PI).toFixed(1)}°E
-            </div>
-          </div>
-
-          {/* 时间系统 */}
-          <div className="pt-3 border-t border-gray-700/50">
-            <div className="text-gray-400 text-xs mb-2">时间系统</div>
-            <div className="text-white text-sm">
-              <div>本地日: {(detailPageState.dayTime * 24.15).toFixed(1)} 小时</div>
-              <div>本地年进度: {((detailPageState.yearTime || 0) * 100).toFixed(1)}%</div>
-            </div>
-          </div>
-
-          {/* 历法信息 */}
-          <div className="pt-3 border-t border-gray-700/50">
-            <div className="text-gray-400 text-xs mb-2">历法系统</div>
-            <div className="text-white text-sm">
-              <div>小月: 7个 × 41天</div>
-              <div>大月: 3个 × 42天</div>
-              <div>月相周期: 41.3天</div>
-            </div>
+          <div className="text-gray-400 text-[10px] mt-1 landscape-mobile:text-[8px] landscape-mobile:mt-0.5">观测位置</div>
+          <div className="text-white font-mono text-xs landscape-mobile:text-[10px]">
+            {(detailPageState.surfaceObservation.latitude * 180 / Math.PI).toFixed(1)}°N, {(detailPageState.surfaceObservation.longitude * 180 / Math.PI).toFixed(1)}°E
           </div>
         </div>
       )}
 
-      {/* 可伸缩参数面板 - 地表视角下隐藏 */}
-      {!detailPageState.surfaceObservation.isSurfaceView && (
+      {/* ===== 底部信息条 ===== */}
+      <div className="absolute bottom-2 left-1/2 transform -translate-x-1/2 z-20 landscape-mobile:bottom-1">
+        <div className="bg-gray-800/85 backdrop-blur-md rounded-xl border border-gray-700/50 px-4 py-1.5 flex items-center gap-3 shadow-lg
+          landscape-mobile:px-2 landscape-mobile:py-1 landscape-mobile:gap-1.5 landscape-mobile:rounded-lg">
+          <div className="text-center landscape-mobile:text-[10px]">
+            <span className="text-gray-400 text-[10px] landscape-mobile:text-[8px]">类型</span>
+            <span className="text-white font-semibold text-xs landscape-mobile:text-[10px] ml-1">{planet?.type === 'planet' ? '类地' : planet?.type}</span>
+          </div>
+          <div className="w-px h-3 bg-gray-700" />
+          <div className="text-center landscape-mobile:text-[10px]">
+            <span className="text-gray-400 text-[10px] landscape-mobile:text-[8px]">直径</span>
+            <span className="text-white font-semibold text-xs landscape-mobile:text-[10px] ml-1">{planet?.diameter || '12,742 km'}</span>
+          </div>
+          <div className="w-px h-3 bg-gray-700 max-md:hidden" />
+          <div className="text-center max-md:hidden">
+            <span className="text-gray-400 text-[10px]">质量</span>
+            <span className="text-white font-semibold text-xs ml-1">{planet?.mass || '5.97e24 kg'}</span>
+          </div>
+          <div className="w-px h-3 bg-gray-700 max-md:hidden" />
+          <div className="text-center max-md:hidden">
+            <span className="text-gray-400 text-[10px]">温度</span>
+            <span className="text-white font-semibold text-xs ml-1">{planet?.temperature || '288 K'}</span>
+          </div>
+          {isSurfaceView && (
+            <>
+              <div className="w-px h-3 bg-gray-700" />
+              <div className="text-center landscape-mobile:text-[10px]">
+                <span className="text-gray-400 text-[10px] landscape-mobile:text-[8px]">纬度</span>
+                <span className="text-white font-semibold text-xs landscape-mobile:text-[10px] ml-1">{(detailPageState.surfaceObservation.latitude * 180 / Math.PI).toFixed(1)}°</span>
+              </div>
+              <div className="text-center landscape-mobile:text-[10px]">
+                <span className="text-gray-400 text-[10px] landscape-mobile:text-[8px]">经度</span>
+                <span className="text-white font-semibold text-xs landscape-mobile:text-[10px] ml-1">{(detailPageState.surfaceObservation.longitude * 180 / Math.PI).toFixed(1)}°</span>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* ===== 参数控制面板 ===== */}
       <>
         {controlsOpen && (
           <div
@@ -1037,880 +1068,598 @@ function DetailPage() {
             onClick={() => setControlsOpen(false)}
           />
         )}
+        {controlsOpen && !isSurfaceView && (
         <div className={`
-          fixed z-40 transition-transform duration-300 ease-in-out
-          max-md:bottom-0 max-md:inset-x-0 max-md:rounded-t-2xl max-md:max-h-[55vh]
-          md:top-16 md:right-0 md:h-[calc(100vh-4rem)] md:rounded-l-2xl
-          w-80 max-md:w-full bg-gray-800/95 backdrop-blur-md
+          fixed z-40 transition-all duration-300 ease-in-out
+          landscape-mobile:bottom-0 landscape-mobile:inset-x-0 landscape-mobile:rounded-t-xl landscape-mobile:max-h-[35vh]
+          md:top-12 md:right-0 md:h-[calc(100vh-3rem)] md:rounded-l-2xl
+          w-72 landscape-mobile:w-full md:w-80 bg-gray-800/95 backdrop-blur-md
           border border-gray-700/50 shadow-2xl overflow-hidden
           flex flex-col
-          ${controlsOpen ? 'translate-x-0 max-md:translate-y-0' : 'md:translate-x-full max-md:translate-y-full'}
+          ${controlsOpen ? 'translate-x-0 landscape-mobile:translate-y-0' : 'md:translate-x-full landscape-mobile:translate-y-full'}
         `}>
-          <div className="flex items-center justify-between p-4 border-b border-gray-700/50 shrink-0">
-            <div className="flex items-center gap-2">
-              <Settings size={18} className="text-blue-400" />
-              <h3 className="text-white font-semibold">参数控制</h3>
+          <div className="flex items-center justify-between px-3 py-2 border-b border-gray-700/50 shrink-0 landscape-mobile:px-2 landscape-mobile:py-1">
+            <div className="flex items-center gap-1.5">
+              <Settings size={16} className="text-blue-400 landscape-mobile:w-3.5 landscape-mobile:h-3.5" />
+              <h3 className="text-white font-semibold text-sm landscape-mobile:text-xs">参数控制</h3>
             </div>
             <button
               onClick={() => setControlsOpen(false)}
               className="p-1 hover:bg-gray-700 rounded-lg transition-colors text-gray-400 hover:text-white"
             >
-              <X size={18} />
+              <X size={16} className="landscape-mobile:w-3.5 landscape-mobile:h-3.5" />
             </button>
           </div>
 
-          <div className="flex-1 overflow-y-auto divide-y divide-gray-700/50">
+          <div className="flex-1 overflow-y-auto divide-y divide-gray-700/50 landscape-mobile:overflow-x-hidden">
             {/* 基本参数 */}
-          <div className="p-4">
+          <div className="p-3 landscape-mobile:p-1.5">
             <button
               onClick={() => toggleSection('basic')}
-              className="w-full flex items-center justify-between text-white mb-3 hover:text-blue-300 transition-colors"
+              className="w-full flex items-center justify-between text-white mb-2 hover:text-blue-300 transition-colors landscape-mobile:mb-1"
             >
-              <div className="flex items-center gap-2">
-                <Maximize2 size={16} />
-                <span className="text-sm font-medium">基本参数</span>
+              <div className="flex items-center gap-1.5">
+                <Maximize2 size={14} className="landscape-mobile:w-3 landscape-mobile:h-3" />
+                <span className="text-sm font-medium landscape-mobile:text-xs">基本参数</span>
               </div>
-              <span className="text-xs text-gray-400">
+              <span className="text-xs text-gray-400 landscape-mobile:text-[10px]">
                 {expandedSection === 'basic' ? '收起' : '展开'}
               </span>
             </button>
             {expandedSection === 'basic' && (
-              <div className="space-y-4">
+              <div className="space-y-3 landscape-mobile:space-y-1.5 landscape-mobile:grid landscape-mobile:grid-cols-2 landscape-mobile:gap-2">
                 {/* 旋转速度 */}
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-gray-300">
-                    <RotateCw size={14} />
-                    <span className="text-sm">旋转速度</span>
-                    <span className="ml-auto text-xs text-gray-400">{detailPageState.rotationSpeed.toFixed(2)}</span>
+                <div className="space-y-1.5 landscape-mobile:space-y-0.5">
+                  <div className="flex items-center gap-1.5 text-gray-300">
+                    <RotateCw size={12} className="landscape-mobile:w-2.5 landscape-mobile:h-2.5" />
+                    <span className="text-xs landscape-mobile:text-[10px]">旋转速度</span>
+                    <span className="ml-auto text-[10px] text-gray-400">{detailPageState.rotationSpeed.toFixed(2)}</span>
                   </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="2"
-                    step="0.05"
-                    value={detailPageState.rotationSpeed}
+                  <input type="range" min="0" max="2" step="0.05" value={detailPageState.rotationSpeed}
                     onChange={(e) => updateDetailPageState({ rotationSpeed: parseFloat(e.target.value) })}
-                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
-                  />
+                    className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500" />
                 </div>
-
                 {/* 行星大小 */}
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-gray-300">
-                    <ZoomIn size={14} />
-                    <span className="text-sm">行星大小</span>
-                    <span className="ml-auto text-xs text-gray-400">{detailPageState.planetScale.toFixed(2)}</span>
+                <div className="space-y-1.5 landscape-mobile:space-y-0.5">
+                  <div className="flex items-center gap-1.5 text-gray-300">
+                    <ZoomIn size={12} className="landscape-mobile:w-2.5 landscape-mobile:h-2.5" />
+                    <span className="text-xs landscape-mobile:text-[10px]">行星大小</span>
+                    <span className="ml-auto text-[10px] text-gray-400">{detailPageState.planetScale.toFixed(2)}</span>
                   </div>
-                  <input
-                    type="range"
-                    min="0.5"
-                    max="3"
-                    step="0.1"
-                    value={detailPageState.planetScale}
+                  <input type="range" min="0.5" max="3" step="0.1" value={detailPageState.planetScale}
                     onChange={(e) => updateDetailPageState({ planetScale: parseFloat(e.target.value) })}
-                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
-                  />
+                    className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500" />
                 </div>
-
                 {/* 轴向倾斜 */}
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-gray-300">
-                    <Globe size={14} />
-                    <span className="text-sm">轴向倾斜</span>
-                    <span className="ml-auto text-xs text-gray-400">{(detailPageState.axialTilt * 180 / Math.PI).toFixed(0)}°</span>
+                <div className="space-y-1.5 landscape-mobile:space-y-0.5 landscape-mobile:col-span-2">
+                  <div className="flex items-center gap-1.5 text-gray-300">
+                    <Globe size={12} className="landscape-mobile:w-2.5 landscape-mobile:h-2.5" />
+                    <span className="text-xs landscape-mobile:text-[10px]">轴向倾斜</span>
+                    <span className="ml-auto text-[10px] text-gray-400">{(detailPageState.axialTilt * 180 / Math.PI).toFixed(0)}°</span>
                   </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.05"
-                    value={detailPageState.axialTilt}
+                  <input type="range" min="0" max="1" step="0.05" value={detailPageState.axialTilt}
                     onChange={(e) => updateDetailPageState({ axialTilt: parseFloat(e.target.value) })}
-                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
-                  />
+                    className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500" />
                 </div>
               </div>
             )}
           </div>
 
-          {/* 昼夜控制 */}
-          <div className="p-4">
+          {/* 昼夜控制 — compact for mobile */}
+          <div className="p-3 landscape-mobile:p-1.5">
             <button
               onClick={() => toggleSection('dayNight')}
-              className="w-full flex items-center justify-between text-white mb-3 hover:text-blue-300 transition-colors"
+              className="w-full flex items-center justify-between text-white mb-2 hover:text-blue-300 transition-colors landscape-mobile:mb-1"
             >
-              <div className="flex items-center gap-2">
-                <Sun size={16} />
-                <span className="text-sm font-medium">昼夜控制</span>
+              <div className="flex items-center gap-1.5">
+                <Sun size={14} className="landscape-mobile:w-3 landscape-mobile:h-3" />
+                <span className="text-sm font-medium landscape-mobile:text-xs">昼夜控制</span>
               </div>
-              <span className="text-xs text-gray-400">
+              <span className="text-xs text-gray-400 landscape-mobile:text-[10px]">
                 {expandedSection === 'dayNight' ? '收起' : '展开'}
               </span>
             </button>
             {expandedSection === 'dayNight' && (
-              <div className="space-y-4">
-                {/* 暂停/播放 */}
-                <button
-                  onClick={() => setIsPaused(!isPaused)}
-                  className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg text-sm"
-                >
-                  {isPaused ? <Sun size={16} /> : <Moon size={16} />}
+              <div className="space-y-3 landscape-mobile:space-y-1.5 landscape-mobile:grid landscape-mobile:grid-cols-2 landscape-mobile:gap-2">
+                <button onClick={() => setIsPaused(!isPaused)}
+                  className="landscape-mobile:col-span-2 w-full flex items-center justify-center gap-1.5 px-2 py-1.5 bg-gray-700 hover:bg-gray-600 text-white rounded-lg text-xs">
+                  {isPaused ? <Sun size={14} /> : <Moon size={14} />}
                   {isPaused ? '继续' : '暂停'}
                 </button>
-                
-                {/* 时间滑块 */}
-                <div className="space-y-2">
+                <div className="space-y-1.5 landscape-mobile:space-y-0.5 landscape-mobile:col-span-2">
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-gray-300">
-                      <Sunrise size={14} />
-                      <span className="text-sm">时间</span>
+                    <div className="flex items-center gap-1.5 text-gray-300">
+                      <Sunrise size={12} className="landscape-mobile:w-2.5 landscape-mobile:h-2.5" />
+                      <span className="text-xs landscape-mobile:text-[10px]">时间</span>
                     </div>
-                    <span className="text-xs text-gray-400">
-                      {detailPageState.dayTime < 0.25 ? '午夜' : 
-                       detailPageState.dayTime < 0.5 ? '早晨' : 
-                       detailPageState.dayTime < 0.75 ? '正午' : '傍晚'}
+                    <span className="text-[10px] text-gray-400">
+                      {detailPageState.dayTime < 0.25 ? '午夜' : detailPageState.dayTime < 0.5 ? '早晨' : detailPageState.dayTime < 0.75 ? '正午' : '傍晚'}
                     </span>
                   </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.01"
-                    value={detailPageState.dayTime}
+                  <input type="range" min="0" max="1" step="0.01" value={detailPageState.dayTime}
                     onChange={(e) => setDayTime(parseFloat(e.target.value))}
-                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-yellow-500"
-                  />
+                    className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-yellow-500" />
                 </div>
-                
-                {/* 循环速度 */}
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-gray-300">
-                    <RotateCw size={14} />
-                    <span className="text-sm">循环速度</span>
-                    <span className="ml-auto text-xs text-gray-400">{detailPageState.dayNightCycleSpeed.toFixed(2)}</span>
+                <div className="space-y-1.5 landscape-mobile:space-y-0.5 landscape-mobile:col-span-2">
+                  <div className="flex items-center gap-1.5 text-gray-300">
+                    <RotateCw size={12} className="landscape-mobile:w-2.5 landscape-mobile:h-2.5" />
+                    <span className="text-xs landscape-mobile:text-[10px]">循环速度</span>
+                    <span className="ml-auto text-[10px] text-gray-400">{detailPageState.dayNightCycleSpeed.toFixed(2)}</span>
                   </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="0.5"
-                    step="0.01"
-                    value={detailPageState.dayNightCycleSpeed}
+                  <input type="range" min="0" max="0.5" step="0.01" value={detailPageState.dayNightCycleSpeed}
                     onChange={(e) => updateDetailPageState({ dayNightCycleSpeed: parseFloat(e.target.value) })}
-                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-yellow-500"
-                  />
+                    className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-yellow-500" />
                 </div>
               </div>
             )}
           </div>
 
-          {/* 视角预设 */}
-          <div className="p-4">
-            <button
-              onClick={() => toggleSection('view')}
-              className="w-full flex items-center justify-between text-white mb-3 hover:text-blue-300 transition-colors"
-            >
-              <div className="flex items-center gap-2">
-                <Eye size={16} />
-                <span className="text-sm font-medium">视角预设</span>
+          {/* 视角预设 — compact */}
+          <div className="p-3 landscape-mobile:p-1.5">
+            <button onClick={() => toggleSection('view')}
+              className="w-full flex items-center justify-between text-white mb-2 hover:text-blue-300 transition-colors landscape-mobile:mb-1">
+              <div className="flex items-center gap-1.5">
+                <Eye size={14} className="landscape-mobile:w-3 landscape-mobile:h-3" />
+                <span className="text-sm font-medium landscape-mobile:text-xs">视角预设</span>
               </div>
-              <span className="text-xs text-gray-400">
+              <span className="text-xs text-gray-400 landscape-mobile:text-[10px]">
                 {expandedSection === 'view' ? '收起' : '展开'}
               </span>
             </button>
             {expandedSection === 'view' && (
-              <div className="space-y-2">
-                <div className="grid grid-cols-2 gap-2">
-                  {Object.entries(viewPresets).map(([key, _]) => (
-                    <button
-                      key={key}
-                      onClick={() => updateDetailPageState({ viewPreset: key as ViewPreset })}
-                      className={`px-3 py-2 rounded text-xs transition-colors ${
-                        detailPageState.viewPreset === key
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                      }`}
-                    >
-                      {key === 'global' ? '全局' :
-                       key === 'equator' ? '赤道' :
-                       key === 'north-pole' ? '北极' :
-                       key === 'south-pole' ? '南极' :
-                       '朝向太阳'}
-                    </button>
-                  ))}
-                </div>
+              <div className="grid grid-cols-3 gap-1.5 landscape-mobile:gap-1">
+                {Object.entries(viewPresets).map(([key, _]) => (
+                  <button key={key} onClick={() => updateDetailPageState({ viewPreset: key as ViewPreset })}
+                    className={`px-2 py-1.5 rounded text-[10px] transition-colors ${detailPageState.viewPreset === key ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}>
+                    {key === 'global' ? '全局' : key === 'equator' ? '赤道' : key === 'north-pole' ? '北极' : key === 'south-pole' ? '南极' : '向阳'}
+                  </button>
+                ))}
               </div>
             )}
           </div>
 
           {/* 质量设置 */}
-          <div className="p-4">
-            <button
-              onClick={() => toggleSection('quality')}
-              className="w-full flex items-center justify-between text-white mb-3 hover:text-blue-300 transition-colors"
-            >
-              <div className="flex items-center gap-2">
-                <Cpu size={16} />
-                <span className="text-sm font-medium">质量设置</span>
+          <div className="p-3 landscape-mobile:p-1.5">
+            <button onClick={() => toggleSection('quality')}
+              className="w-full flex items-center justify-between text-white mb-2 hover:text-blue-300 transition-colors landscape-mobile:mb-1">
+              <div className="flex items-center gap-1.5">
+                <Cpu size={14} className="landscape-mobile:w-3 landscape-mobile:h-3" />
+                <span className="text-sm font-medium landscape-mobile:text-xs">质量设置</span>
               </div>
-              <span className="text-xs text-gray-400">
+              <span className="text-xs text-gray-400 landscape-mobile:text-[10px]">
                 {expandedSection === 'quality' ? '收起' : '展开'}
               </span>
             </button>
             {expandedSection === 'quality' && (
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-2">
-                  {(['low', 'medium', 'high', 'ultra'] as QualityLevel[]).map((level) => (
-                    <button
-                      key={level}
-                      onClick={() => {
-                        updateDetailPageState({ qualityLevel: level })
-                        updateTextureParams({ 
-                          resolution: level === 'low' ? '1024' : 
-                                     level === 'ultra' ? '4096' : '2048' 
-                        })
-                      }}
-                      className={`px-3 py-2 rounded text-xs transition-colors ${
-                        detailPageState.qualityLevel === level
-                          ? 'bg-green-600 text-white'
-                          : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                      }`}
-                    >
-                      {level === 'low' ? '低' :
-                       level === 'medium' ? '中' :
-                       level === 'high' ? '高' : '超高'}
-                    </button>
-                  ))}
-                </div>
+              <div className="grid grid-cols-4 gap-1.5 landscape-mobile:gap-1">
+                {(['low', 'medium', 'high', 'ultra'] as QualityLevel[]).map((level) => (
+                  <button key={level} onClick={() => { updateDetailPageState({ qualityLevel: level }); updateTextureParams({ resolution: level === 'low' ? '1024' : level === 'ultra' ? '4096' : '2048' }) }}
+                    className={`px-1 py-1.5 rounded text-[10px] transition-colors ${detailPageState.qualityLevel === level ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}>
+                    {level === 'low' ? '低' : level === 'medium' ? '中' : level === 'high' ? '高' : '超高'}
+                  </button>
+                ))}
               </div>
             )}
           </div>
 
-          {/* 地形参数 */}
-          <div className="p-4">
-            <button
-              onClick={() => toggleSection('terrain')}
-              className="w-full flex items-center justify-between text-white mb-3 hover:text-blue-300 transition-colors"
-            >
-              <div className="flex items-center gap-2">
-                <Mountain size={16} />
-                <span className="text-sm font-medium">地形参数</span>
+          {/* 地形参数 — compact */}
+          <div className="p-3 landscape-mobile:p-1.5">
+            <button onClick={() => toggleSection('terrain')}
+              className="w-full flex items-center justify-between text-white mb-2 hover:text-blue-300 transition-colors landscape-mobile:mb-1">
+              <div className="flex items-center gap-1.5">
+                <Mountain size={14} className="landscape-mobile:w-3 landscape-mobile:h-3" />
+                <span className="text-sm font-medium landscape-mobile:text-xs">地形参数</span>
               </div>
-              <span className="text-xs text-gray-400">
+              <span className="text-xs text-gray-400 landscape-mobile:text-[10px]">
                 {expandedSection === 'terrain' ? '收起' : '展开'}
               </span>
             </button>
             {expandedSection === 'terrain' && (
-              <div className="space-y-4">
-                {/* 地形粗糙度 */}
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-gray-300">
-                    <Mountain size={14} />
-                    <span className="text-sm">地形粗糙度</span>
-                    <span className="ml-auto text-xs text-gray-400">{detailPageState.textureParams.terrainRoughness.toFixed(2)}</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.05"
-                    value={detailPageState.textureParams.terrainRoughness}
-                    onChange={(e) => updateTextureParams({ 
-                      terrainRoughness: parseFloat(e.target.value),
-                      seed: Date.now() % 10000 // 更新seed以确保纹理重新生成
-                    })}
-                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-green-500"
-                  />
+              <div className="space-y-1.5 landscape-mobile:space-y-0.5">
+                <div className="flex items-center gap-1.5 text-gray-300">
+                  <Mountain size={12} className="landscape-mobile:w-2.5 landscape-mobile:h-2.5" />
+                  <span className="text-xs landscape-mobile:text-[10px]">地形粗糙度</span>
+                  <span className="ml-auto text-[10px] text-gray-400">{detailPageState.textureParams.terrainRoughness.toFixed(2)}</span>
                 </div>
+                <input type="range" min="0" max="1" step="0.05" value={detailPageState.textureParams.terrainRoughness}
+                  onChange={(e) => updateTextureParams({ terrainRoughness: parseFloat(e.target.value), seed: Date.now() % 10000 })}
+                  className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-green-500" />
               </div>
             )}
           </div>
 
-          {/* 云层参数 */}
-          <div className="p-4">
-            <button
-              onClick={() => toggleSection('clouds')}
-              className="w-full flex items-center justify-between text-white mb-3 hover:text-blue-300 transition-colors"
-            >
-              <div className="flex items-center gap-2">
-                <Cloud size={16} />
-                <span className="text-sm font-medium">云层参数</span>
+          {/* 云层参数 — compact */}
+          <div className="p-3 landscape-mobile:p-1.5">
+            <button onClick={() => toggleSection('clouds')}
+              className="w-full flex items-center justify-between text-white mb-2 hover:text-blue-300 transition-colors landscape-mobile:mb-1">
+              <div className="flex items-center gap-1.5">
+                <Cloud size={14} className="landscape-mobile:w-3 landscape-mobile:h-3" />
+                <span className="text-sm font-medium landscape-mobile:text-xs">云层参数</span>
               </div>
-              <span className="text-xs text-gray-400">
+              <span className="text-xs text-gray-400 landscape-mobile:text-[10px]">
                 {expandedSection === 'clouds' ? '收起' : '展开'}
               </span>
             </button>
             {expandedSection === 'clouds' && (
-              <div className="space-y-4">
-                {/* 显示云层 */}
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={detailPageState.showClouds}
+              <div className="space-y-2 landscape-mobile:space-y-1 landscape-mobile:grid landscape-mobile:grid-cols-2 landscape-mobile:gap-2">
+                <label className="flex items-center gap-1.5 cursor-pointer landscape-mobile:col-span-2">
+                  <input type="checkbox" checked={detailPageState.showClouds}
                     onChange={(e) => updateDetailPageState({ showClouds: e.target.checked })}
-                    className="accent-blue-500"
-                  />
-                  <span className="text-gray-300 text-sm">显示云层</span>
+                    className="accent-blue-500" />
+                  <span className="text-gray-300 text-xs landscape-mobile:text-[10px]">显示云层</span>
                 </label>
-
-                {/* 云层覆盖度 */}
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-gray-300">
-                    <Cloud size={14} />
-                    <span className="text-sm">云层覆盖度</span>
-                    <span className="ml-auto text-xs text-gray-400">{detailPageState.textureParams.cloudCoverage.toFixed(2)}</span>
+                <div className="space-y-1 landscape-mobile:space-y-0.5">
+                  <div className="flex items-center gap-1.5 text-gray-300">
+                    <Wind size={12} className="landscape-mobile:w-2.5 landscape-mobile:h-2.5" />
+                    <span className="text-xs landscape-mobile:text-[10px]">云速</span>
+                    <span className="ml-auto text-[10px] text-gray-400">{detailPageState.cloudSpeed.toFixed(2)}</span>
                   </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.05"
-                    value={detailPageState.textureParams.cloudCoverage}
-                    onChange={(e) => updateTextureParams({ 
-                      cloudCoverage: parseFloat(e.target.value),
-                      seed: Date.now() % 10000 // 更新seed以确保纹理重新生成
-                    })}
-                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
-                  />
+                  <input type="range" min="0" max="2" step="0.05" value={detailPageState.cloudSpeed}
+                    onChange={(e) => updateDetailPageState({ cloudSpeed: parseFloat(e.target.value) })}
+                    className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-cyan-500" />
+                </div>
+                <div className="space-y-1 landscape-mobile:space-y-0.5">
+                  <div className="flex items-center gap-1.5 text-gray-300">
+                    <Cloud size={12} className="landscape-mobile:w-2.5 landscape-mobile:h-2.5" />
+                    <span className="text-xs landscape-mobile:text-[10px]">覆盖度</span>
+                    <span className="ml-auto text-[10px] text-gray-400">{detailPageState.textureParams.cloudCoverage.toFixed(2)}</span>
+                  </div>
+                  <input type="range" min="0" max="1" step="0.05" value={detailPageState.textureParams.cloudCoverage}
+                    onChange={(e) => updateTextureParams({ cloudCoverage: parseFloat(e.target.value), seed: Date.now() % 10000 })}
+                    className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-cyan-500" />
+                </div>
+                <div className="space-y-1 landscape-mobile:space-y-0.5">
+                  <div className="flex items-center gap-1.5 text-gray-300">
+                    <Droplets size={12} className="landscape-mobile:w-2.5 landscape-mobile:h-2.5" />
+                    <span className="text-xs landscape-mobile:text-[10px]">厚度</span>
+                    <span className="ml-auto text-[10px] text-gray-400">{detailPageState.textureParams.cloudOpacity.toFixed(2)}</span>
+                  </div>
+                  <input type="range" min="0.1" max="1.0" step="0.05" value={detailPageState.textureParams.cloudOpacity}
+                    onChange={(e) => updateTextureParams({ cloudOpacity: parseFloat(e.target.value) })}
+                    className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-cyan-500" />
                 </div>
               </div>
             )}
           </div>
 
-          {/* 大气参数 */}
-          <div className="p-4">
-            <button
-              onClick={() => toggleSection('atmosphere')}
-              className="w-full flex items-center justify-between text-white mb-3 hover:text-blue-300 transition-colors"
-            >
-              <div className="flex items-center gap-2">
-                <Wind size={16} />
-                <span className="text-sm font-medium">大气参数</span>
+          {/* 大气参数 — simplified for mobile */}
+          <div className="p-3 landscape-mobile:p-1.5">
+            <button onClick={() => toggleSection('atmosphere')}
+              className="w-full flex items-center justify-between text-white mb-2 hover:text-blue-300 transition-colors landscape-mobile:mb-1">
+              <div className="flex items-center gap-1.5">
+                <Wind size={14} className="landscape-mobile:w-3 landscape-mobile:h-3" />
+                <span className="text-sm font-medium landscape-mobile:text-xs">大气参数</span>
               </div>
-              <span className="text-xs text-gray-400">
+              <span className="text-xs text-gray-400 landscape-mobile:text-[10px]">
                 {expandedSection === 'atmosphere' ? '收起' : '展开'}
               </span>
             </button>
             {expandedSection === 'atmosphere' && (
-              <div className="space-y-4">
-                {/* 显示大气 */}
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={detailPageState.showAtmosphere}
+              <div className="space-y-2 landscape-mobile:space-y-1 landscape-mobile:grid landscape-mobile:grid-cols-2 landscape-mobile:gap-2">
+                <label className="flex items-center gap-1.5 cursor-pointer landscape-mobile:col-span-2">
+                  <input type="checkbox" checked={detailPageState.showAtmosphere}
                     onChange={(e) => updateDetailPageState({ showAtmosphere: e.target.checked })}
-                    className="accent-blue-500"
-                  />
-                  <span className="text-gray-300 text-sm">显示大气</span>
+                    className="accent-blue-500" />
+                  <span className="text-gray-300 text-xs landscape-mobile:text-[10px]">显示大气</span>
                 </label>
-
-                {/* 大气密度 */}
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-gray-300">
-                    <Droplets size={14} />
-                    <span className="text-sm">大气密度</span>
-                    <span className="ml-auto text-xs text-gray-400">{detailPageState.textureParams.atmosphereDensity.toFixed(2)}</span>
+                <div className="space-y-1 landscape-mobile:space-y-0.5">
+                  <div className="flex items-center gap-1.5 text-gray-300">
+                    <Droplets size={12} className="landscape-mobile:w-2.5 landscape-mobile:h-2.5" />
+                    <span className="text-xs landscape-mobile:text-[10px]">密度</span>
+                    <span className="ml-auto text-[10px] text-gray-400">{detailPageState.textureParams.atmosphereDensity.toFixed(2)}</span>
                   </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1.5"
-                    step="0.05"
-                    value={detailPageState.textureParams.atmosphereDensity}
+                  <input type="range" min="0" max="1.5" step="0.05" value={detailPageState.textureParams.atmosphereDensity}
                     onChange={(e) => updateTextureParams({ atmosphereDensity: parseFloat(e.target.value) })}
-                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                  />
+                    className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-500" />
                 </div>
-
-                {/* 大气辉光强度 */}
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-gray-300">
-                    <Sun size={14} />
-                    <span className="text-sm">辉光强度</span>
-                    <span className="ml-auto text-xs text-gray-400">{detailPageState.atmosphereGlowIntensity.toFixed(2)}</span>
+                <div className="space-y-1 landscape-mobile:space-y-0.5">
+                  <div className="flex items-center gap-1.5 text-gray-300">
+                    <Palette size={12} className="landscape-mobile:w-2.5 landscape-mobile:h-2.5" />
+                    <span className="text-xs landscape-mobile:text-[10px]">颜色</span>
                   </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="3"
-                    step="0.1"
-                    value={detailPageState.atmosphereGlowIntensity}
-                    onChange={(e) => updateDetailPageState({ atmosphereGlowIntensity: parseFloat(e.target.value) })}
-                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                  />
-                </div>
-
-                {/* 大气内层半径 */}
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-gray-300">
-                    <Maximize size={14} />
-                    <span className="text-sm">内层半径</span>
-                    <span className="ml-auto text-xs text-gray-400">{detailPageState.atmosphereInnerRadius.toFixed(2)}x</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="1"
-                    max="2"
-                    step="0.05"
-                    value={detailPageState.atmosphereInnerRadius}
-                    onChange={(e) => updateDetailPageState({ atmosphereInnerRadius: parseFloat(e.target.value) })}
-                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                  />
-                </div>
-
-                {/* 大气外层半径 */}
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-gray-300">
-                    <Maximize size={14} />
-                    <span className="text-sm">外层半径</span>
-                    <span className="ml-auto text-xs text-gray-400">{detailPageState.atmosphereOuterRadius.toFixed(2)}x</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="1.1"
-                    max="3"
-                    step="0.1"
-                    value={detailPageState.atmosphereOuterRadius}
-                    onChange={(e) => updateDetailPageState({ atmosphereOuterRadius: parseFloat(e.target.value) })}
-                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                  />
-                </div>
-
-                {/* 大气颜色 */}
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-gray-300">
-                    <Palette size={14} />
-                    <span className="text-sm">大气颜色</span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <input
-                      type="color"
-                      value={detailPageState.textureParams.atmosphereColor}
-                      onChange={(e) => updateTextureParams({ atmosphereColor: e.target.value })}
-                      className="w-10 h-10 rounded cursor-pointer border-2 border-gray-600"
-                    />
-                    <span className="text-gray-400 text-sm font-mono">{detailPageState.textureParams.atmosphereColor}</span>
-                  </div>
+                  <input type="color" value={detailPageState.textureParams.atmosphereColor}
+                    onChange={(e) => updateTextureParams({ atmosphereColor: e.target.value })}
+                    className="w-full h-6 rounded cursor-pointer border border-gray-600" />
                 </div>
               </div>
             )}
           </div>
 
           {/* 行星环参数 */}
-          <div className="p-4">
-            <button
-              onClick={() => toggleSection('ring')}
-              className="w-full flex items-center justify-between text-white mb-3 hover:text-blue-300 transition-colors"
-            >
-              <div className="flex items-center gap-2">
-                <Minimize2 size={16} />
-                <span className="text-sm font-medium">行星环参数</span>
+          <div className="p-3 landscape-mobile:p-1.5">
+            <button onClick={() => toggleSection('ring')}
+              className="w-full flex items-center justify-between text-white mb-2 hover:text-blue-300 transition-colors landscape-mobile:mb-1">
+              <div className="flex items-center gap-1.5">
+                <Minimize2 size={14} className="landscape-mobile:w-3 landscape-mobile:h-3" />
+                <span className="text-sm font-medium landscape-mobile:text-xs">行星环</span>
               </div>
-              <span className="text-xs text-gray-400">
+              <span className="text-xs text-gray-400 landscape-mobile:text-[10px]">
                 {expandedSection === 'ring' ? '收起' : '展开'}
               </span>
             </button>
             {expandedSection === 'ring' && (
-              <div className="space-y-4">
-                {/* === 环面控制 === */}
-                <div className="border-b border-gray-700/50 pb-3">
-                  <span className="text-xs text-gray-500 font-medium uppercase">环面</span>
-                </div>
-
-                {/* 显示环面 */}
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={detailPageState.showRing}
+              <div className="space-y-2 landscape-mobile:space-y-1 landscape-mobile:grid landscape-mobile:grid-cols-2 landscape-mobile:gap-2">
+                <label className="flex items-center gap-1.5 cursor-pointer landscape-mobile:col-span-2">
+                  <input type="checkbox" checked={detailPageState.showRing}
                     onChange={(e) => updateDetailPageState({ showRing: e.target.checked })}
-                    className="accent-blue-500"
-                  />
-                  <span className="text-gray-300 text-sm">显示环面</span>
+                    className="accent-blue-500" />
+                  <span className="text-gray-300 text-xs landscape-mobile:text-[10px]">显示环面</span>
                 </label>
-
-                {/* 环面不透明度 */}
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-gray-300">
-                    <Eye size={14} />
-                    <span className="text-sm">环面不透明度</span>
-                    <span className="ml-auto text-xs text-gray-400">{detailPageState.ringOpacity.toFixed(2)}</span>
+                <div className="space-y-1 landscape-mobile:space-y-0.5">
+                  <div className="flex items-center gap-1.5 text-gray-300">
+                    <Eye size={12} className="landscape-mobile:w-2.5 landscape-mobile:h-2.5" />
+                    <span className="text-xs landscape-mobile:text-[10px]">透明度</span>
+                    <span className="ml-auto text-[10px] text-gray-400">{detailPageState.ringOpacity.toFixed(2)}</span>
                   </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.05"
-                    value={detailPageState.ringOpacity}
+                  <input type="range" min="0" max="1" step="0.05" value={detailPageState.ringOpacity}
                     onChange={(e) => updateDetailPageState({ ringOpacity: parseFloat(e.target.value) })}
-                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
-                  />
+                    className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-amber-500" />
                 </div>
-
-                {/* 环面亮度 */}
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-gray-300">
-                    <Sun size={14} />
-                    <span className="text-sm">环面亮度</span>
-                    <span className="ml-auto text-xs text-gray-400">{detailPageState.ringEmissiveIntensity.toFixed(2)}</span>
+                <div className="space-y-1 landscape-mobile:space-y-0.5">
+                  <div className="flex items-center gap-1.5 text-gray-300">
+                    <Sun size={12} className="landscape-mobile:w-2.5 landscape-mobile:h-2.5" />
+                    <span className="text-xs landscape-mobile:text-[10px]">亮度</span>
+                    <span className="ml-auto text-[10px] text-gray-400">{detailPageState.ringEmissiveIntensity.toFixed(2)}</span>
                   </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1.5"
-                    step="0.05"
-                    value={detailPageState.ringEmissiveIntensity}
+                  <input type="range" min="0" max="1.5" step="0.05" value={detailPageState.ringEmissiveIntensity}
                     onChange={(e) => updateDetailPageState({ ringEmissiveIntensity: parseFloat(e.target.value) })}
-                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
-                  />
+                    className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-amber-500" />
                 </div>
-
-                {/* 环内半径缩放 */}
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-gray-300">
-                    <Minimize2 size={14} />
-                    <span className="text-sm">内半径缩放</span>
-                    <span className="ml-auto text-xs text-gray-400">{detailPageState.ringInnerRadiusScale.toFixed(2)}x</span>
+                <div className="space-y-1 landscape-mobile:space-y-0.5">
+                  <div className="flex items-center gap-1.5 text-gray-300">
+                    <Maximize2 size={12} className="landscape-mobile:w-2.5 landscape-mobile:h-2.5" />
+                    <span className="text-xs landscape-mobile:text-[10px]">内径缩放</span>
+                    <span className="ml-auto text-[10px] text-gray-400">{detailPageState.ringInnerRadiusScale.toFixed(2)}</span>
                   </div>
-                  <input
-                    type="range"
-                    min="0.5"
-                    max="2.0"
-                    step="0.05"
-                    value={detailPageState.ringInnerRadiusScale}
+                  <input type="range" min="0.5" max="2" step="0.05" value={detailPageState.ringInnerRadiusScale}
                     onChange={(e) => updateDetailPageState({ ringInnerRadiusScale: parseFloat(e.target.value) })}
-                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
-                  />
+                    className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-amber-500" />
                 </div>
-
-                {/* 环外半径缩放 */}
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-gray-300">
-                    <Maximize2 size={14} />
-                    <span className="text-sm">外半径缩放</span>
-                    <span className="ml-auto text-xs text-gray-400">{detailPageState.ringOuterRadiusScale.toFixed(2)}x</span>
+                <div className="space-y-1 landscape-mobile:space-y-0.5">
+                  <div className="flex items-center gap-1.5 text-gray-300">
+                    <Maximize2 size={12} className="landscape-mobile:w-2.5 landscape-mobile:h-2.5" />
+                    <span className="text-xs landscape-mobile:text-[10px]">外径缩放</span>
+                    <span className="ml-auto text-[10px] text-gray-400">{detailPageState.ringOuterRadiusScale.toFixed(2)}</span>
                   </div>
-                  <input
-                    type="range"
-                    min="0.5"
-                    max="3.0"
-                    step="0.05"
-                    value={detailPageState.ringOuterRadiusScale}
+                  <input type="range" min="0.5" max="2" step="0.05" value={detailPageState.ringOuterRadiusScale}
                     onChange={(e) => updateDetailPageState({ ringOuterRadiusScale: parseFloat(e.target.value) })}
-                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
-                  />
+                    className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-amber-500" />
                 </div>
-
-                {/* === 粒子控制 === */}
-                <div className="border-b border-gray-700/50 pb-3 pt-2">
-                  <span className="text-xs text-gray-500 font-medium uppercase">环粒子</span>
-                </div>
-
-                {/* 显示环粒子 */}
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={detailPageState.showRingParticles}
+                <label className="flex items-center gap-1.5 cursor-pointer landscape-mobile:col-span-2">
+                  <input type="checkbox" checked={detailPageState.showRingParticles}
                     onChange={(e) => updateDetailPageState({ showRingParticles: e.target.checked })}
-                    className="accent-blue-500"
-                  />
-                  <span className="text-gray-300 text-sm">显示环粒子</span>
+                    className="accent-blue-500" />
+                  <span className="text-gray-300 text-xs landscape-mobile:text-[10px]">显示粒子</span>
                 </label>
-
-                {/* 粒子数量 */}
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-gray-300">
-                    <Plus size={14} />
-                    <span className="text-sm">粒子数量</span>
-                    <span className="ml-auto text-xs text-gray-400">{detailPageState.ringParticleCount}</span>
+                <div className="space-y-1 landscape-mobile:space-y-0.5">
+                  <div className="flex items-center gap-1.5 text-gray-300">
+                    <Plus size={12} className="landscape-mobile:w-2.5 landscape-mobile:h-2.5" />
+                    <span className="text-xs landscape-mobile:text-[10px]">粒子数</span>
+                    <span className="ml-auto text-[10px] text-gray-400">{detailPageState.ringParticleCount}</span>
                   </div>
-                  <input
-                    type="range"
-                    min="100"
-                    max="5000"
-                    step="100"
-                    value={detailPageState.ringParticleCount}
+                  <input type="range" min="100" max="5000" step="100" value={detailPageState.ringParticleCount}
                     onChange={(e) => updateDetailPageState({ ringParticleCount: parseInt(e.target.value) })}
-                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
-                  />
+                    className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-cyan-500" />
                 </div>
-
-                {/* 粒子半径范围 */}
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-gray-300">
-                    <Maximize2 size={14} />
-                    <span className="text-sm">粒子径向范围</span>
-                    <span className="ml-auto text-xs text-gray-400">{detailPageState.ringParticleRadiusScale.toFixed(2)}x</span>
+                <div className="space-y-1 landscape-mobile:space-y-0.5">
+                  <div className="flex items-center gap-1.5 text-gray-300">
+                    <Eye size={12} className="landscape-mobile:w-2.5 landscape-mobile:h-2.5" />
+                    <span className="text-xs landscape-mobile:text-[10px]">粒径</span>
+                    <span className="ml-auto text-[10px] text-gray-400">{detailPageState.ringParticleSize.toFixed(1)}x</span>
                   </div>
-                  <input
-                    type="range"
-                    min="0.5"
-                    max="2.0"
-                    step="0.05"
-                    value={detailPageState.ringParticleRadiusScale}
-                    onChange={(e) => updateDetailPageState({ ringParticleRadiusScale: parseFloat(e.target.value) })}
-                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
-                  />
-                </div>
-
-                {/* 粒子大小 */}
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-gray-300">
-                    <Minimize2 size={14} />
-                    <span className="text-sm">粒子大小</span>
-                    <span className="ml-auto text-xs text-gray-400">{detailPageState.ringParticleSize.toFixed(1)}x</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0.1"
-                    max="5"
-                    step="0.1"
-                    value={detailPageState.ringParticleSize}
+                  <input type="range" min="0.1" max="5" step="0.1" value={detailPageState.ringParticleSize}
                     onChange={(e) => updateDetailPageState({ ringParticleSize: parseFloat(e.target.value) })}
-                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
-                  />
+                    className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-cyan-500" />
                 </div>
-
-                {/* 粒子不透明度 */}
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-gray-300">
-                    <Eye size={14} />
-                    <span className="text-sm">粒子不透明度</span>
-                    <span className="ml-auto text-xs text-gray-400">{detailPageState.ringParticleOpacity.toFixed(2)}</span>
+                <div className="space-y-1 landscape-mobile:space-y-0.5">
+                  <div className="flex items-center gap-1.5 text-gray-300">
+                    <Maximize2 size={12} className="landscape-mobile:w-2.5 landscape-mobile:h-2.5" />
+                    <span className="text-xs landscape-mobile:text-[10px]">粒子范围</span>
+                    <span className="ml-auto text-[10px] text-gray-400">{detailPageState.ringParticleRadiusScale.toFixed(2)}</span>
                   </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.05"
-                    value={detailPageState.ringParticleOpacity}
+                  <input type="range" min="0.5" max="2" step="0.05" value={detailPageState.ringParticleRadiusScale}
+                    onChange={(e) => updateDetailPageState({ ringParticleRadiusScale: parseFloat(e.target.value) })}
+                    className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-cyan-500" />
+                </div>
+                <div className="space-y-1 landscape-mobile:space-y-0.5">
+                  <div className="flex items-center gap-1.5 text-gray-300">
+                    <Eye size={12} className="landscape-mobile:w-2.5 landscape-mobile:h-2.5" />
+                    <span className="text-xs landscape-mobile:text-[10px]">粒子透明度</span>
+                    <span className="ml-auto text-[10px] text-gray-400">{detailPageState.ringParticleOpacity.toFixed(2)}</span>
+                  </div>
+                  <input type="range" min="0" max="1" step="0.05" value={detailPageState.ringParticleOpacity}
                     onChange={(e) => updateDetailPageState({ ringParticleOpacity: parseFloat(e.target.value) })}
-                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
-                  />
+                    className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-cyan-500" />
                 </div>
               </div>
             )}
           </div>
 
-          {/* 天体参数 */}
-          <div className="p-4">
-            <button
-              onClick={() => toggleSection('celestial')}
-              className="w-full flex items-center justify-between text-white mb-3 hover:text-blue-300 transition-colors"
-            >
-              <div className="flex items-center gap-2">
-                <Sun size={16} className="text-yellow-400" />
-                <span className="text-sm font-medium">天体参数</span>
+          {/* 时间系统 — compact */}
+          <div className="p-3 landscape-mobile:p-1.5">
+            <button onClick={() => toggleSection('time')}
+              className="w-full flex items-center justify-between text-white mb-2 hover:text-blue-300 transition-colors landscape-mobile:mb-1">
+              <div className="flex items-center gap-1.5">
+                <Clock size={14} className="landscape-mobile:w-3 landscape-mobile:h-3" />
+                <span className="text-sm font-medium landscape-mobile:text-xs">时间系统</span>
               </div>
-              <span className="text-xs text-gray-400">
-                {expandedSection === 'celestial' ? '收起' : '展开'}
-              </span>
-            </button>
-            {expandedSection === 'celestial' && (
-              <div className="space-y-4">
-                {/* 行星特殊参数 */}
-                <div className="border-b border-gray-700/50 pb-3">
-                  <span className="text-xs text-gray-500 font-medium uppercase">行星特性</span>
-                </div>
-
-                {/* 大气厚度 */}
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-gray-300">
-                    <Cloud size={14} />
-                    <span className="text-sm">大气厚度</span>
-                    <span className="ml-auto text-xs text-gray-400">1.5x</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0.5"
-                    max="3"
-                    step="0.1"
-                    value="1.5"
-                    disabled
-                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-not-allowed accent-gray-500 opacity-60"
-                  />
-                </div>
-
-                {/* 温室效应 */}
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-gray-300">
-                    <Sun size={14} />
-                    <span className="text-sm">温室效应</span>
-                    <span className="ml-auto text-xs text-gray-400">1.3x</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0.5"
-                    max="3"
-                    step="0.1"
-                    value="1.3"
-                    disabled
-                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-not-allowed accent-gray-500 opacity-60"
-                  />
-                </div>
-
-                {/* 地质活跃度 */}
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-gray-300">
-                    <Mountain size={14} />
-                    <span className="text-sm">地质活跃度</span>
-                    <span className="ml-auto text-xs text-gray-400">1.4x</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0.5"
-                    max="3"
-                    step="0.1"
-                    value="1.4"
-                    disabled
-                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-not-allowed accent-gray-500 opacity-60"
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* 时间系统 */}
-          <div className="p-4">
-            <button
-              onClick={() => toggleSection('time')}
-              className="w-full flex items-center justify-between text-white mb-3 hover:text-blue-300 transition-colors"
-            >
-              <div className="flex items-center gap-2">
-                <Clock size={16} className="text-blue-400" />
-                <span className="text-sm font-medium">时间系统</span>
-              </div>
-              <span className="text-xs text-gray-400">
+              <span className="text-xs text-gray-400 landscape-mobile:text-[10px]">
                 {expandedSection === 'time' ? '收起' : '展开'}
               </span>
             </button>
             {expandedSection === 'time' && (
-              <div className="space-y-4">
-                {/* 日进度滑块 */}
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-gray-300">
-                    <Sun size={14} />
-                    <span className="text-sm">日进度</span>
-                    <span className="ml-auto text-xs text-gray-400">{(detailPageState.dayTime * 100).toFixed(0)}%</span>
+              <div className="space-y-2 landscape-mobile:space-y-1 landscape-mobile:grid landscape-mobile:grid-cols-2 landscape-mobile:gap-2">
+                <div className="space-y-1 landscape-mobile:col-span-2 landscape-mobile:space-y-0.5">
+                  <div className="flex items-center gap-1.5 text-gray-300">
+                    <Sun size={12} className="landscape-mobile:w-2.5 landscape-mobile:h-2.5" />
+                    <span className="text-xs landscape-mobile:text-[10px]">日进度</span>
+                    <span className="ml-auto text-[10px] text-gray-400">{(detailPageState.dayTime * 100).toFixed(0)}%</span>
                   </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.01"
-                    value={detailPageState.dayTime}
+                  <input type="range" min="0" max="1" step="0.01" value={detailPageState.dayTime}
                     onChange={(e) => updateDetailPageState({ dayTime: parseFloat(e.target.value) })}
-                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-yellow-500"
-                  />
+                    className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-yellow-500" />
                 </div>
-
-                {/* 年进度滑块 */}
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-gray-300">
-                    <RotateCw size={14} />
-                    <span className="text-sm">年进度</span>
-                    <span className="ml-auto text-xs text-gray-400">{((detailPageState.yearTime || 0) * 100).toFixed(0)}%</span>
+                <div className="space-y-1 landscape-mobile:col-span-2 landscape-mobile:space-y-0.5">
+                  <div className="flex items-center gap-1.5 text-gray-300">
+                    <RotateCw size={12} className="landscape-mobile:w-2.5 landscape-mobile:h-2.5" />
+                    <span className="text-xs landscape-mobile:text-[10px]">年进度</span>
+                    <span className="ml-auto text-[10px] text-gray-400">{((detailPageState.yearTime || 0) * 100).toFixed(0)}%</span>
                   </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.01"
-                    value={detailPageState.yearTime || 0}
+                  <input type="range" min="0" max="1" step="0.01" value={detailPageState.yearTime || 0}
                     onChange={(e) => updateDetailPageState({ yearTime: parseFloat(e.target.value) })}
-                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
-                  />
+                    className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500" />
                 </div>
-
-                <div className="pt-2 border-t border-gray-700/50 text-gray-300 text-sm space-y-2">
-                  <div className="flex justify-between">
-                    <span>本地日</span>
-                    <span className="text-yellow-400 font-mono">24.15 小时</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>本地年</span>
-                    <span className="text-yellow-400 font-mono">426.15 天</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>月相周期</span>
-                    <span className="text-yellow-400 font-mono">41.3 天</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>小月/大月</span>
-                    <span className="text-yellow-400 font-mono">7×41 / 3×42</span>
-                  </div>
+                <div className="landscape-mobile:col-span-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-gray-300">
+                  <span>本地日 <span className="text-yellow-400">24.15h</span></span>
+                  <span>本地年 <span className="text-yellow-400">426.15d</span></span>
+                  <span>月相 <span className="text-yellow-400">41.3d</span></span>
+                  <span>小/大月 <span className="text-yellow-400">7×41/3×42</span></span>
                 </div>
               </div>
             )}
           </div>
 
-          <div className="p-4 border-t border-gray-700/50 bg-gray-900/50 shrink-0">
-            <p className="text-gray-400 text-xs text-center">调整参数会重新生成纹理</p>
+          <div className="p-2 border-t border-gray-700/50 bg-gray-900/50 shrink-0 landscape-mobile:p-1">
+            <p className="text-gray-400 text-[10px] text-center landscape-mobile:text-[8px]">调整参数会重新生成纹理</p>
           </div>
           </div>
         </div>
+        )}
+        {controlsOpen && isSurfaceView && (
+        <div className={`
+          fixed z-40 transition-all duration-300 ease-in-out
+          landscape-mobile:bottom-0 landscape-mobile:inset-x-0 landscape-mobile:rounded-t-xl landscape-mobile:max-h-[35vh]
+          md:top-12 md:right-0 md:h-[calc(100vh-3rem)] md:rounded-l-2xl
+          w-72 landscape-mobile:w-full md:w-80 bg-gray-800/95 backdrop-blur-md
+          border border-gray-700/50 shadow-2xl overflow-hidden
+          flex flex-col
+          ${controlsOpen ? 'translate-x-0 landscape-mobile:translate-y-0' : 'md:translate-x-full landscape-mobile:translate-y-full'}
+        `}>
+          <div className="flex items-center justify-between px-3 py-2 border-b border-gray-700/50 shrink-0 landscape-mobile:px-2 landscape-mobile:py-1">
+            <div className="flex items-center gap-1.5">
+              <Settings size={16} className="text-blue-400 landscape-mobile:w-3.5 landscape-mobile:h-3.5" />
+              <h3 className="text-white font-semibold text-sm landscape-mobile:text-xs">地表观测</h3>
+            </div>
+            <button
+              onClick={() => setControlsOpen(false)}
+              className="p-1 hover:bg-gray-700 rounded-lg transition-colors text-gray-400 hover:text-white"
+            >
+              <X size={16} className="landscape-mobile:w-3.5 landscape-mobile:h-3.5" />
+            </button>
+          </div>
 
+          <div className="flex-1 overflow-y-auto p-3 landscape-mobile:p-1.5 landscape-mobile:grid landscape-mobile:grid-cols-2 landscape-mobile:gap-2">
+            {/* 大气折射开关 */}
+            <label className="flex items-center gap-1.5 cursor-pointer landscape-mobile:col-span-2">
+              <input type="checkbox" checked={detailPageState.surfaceObservation.atmosphereRefraction}
+                onChange={(e) => setSurfaceObservation({ atmosphereRefraction: e.target.checked })}
+                className="accent-blue-500" />
+              <span className="text-gray-300 text-xs landscape-mobile:text-[10px]">大气折射</span>
+            </label>
+
+            {/* 折射系数 */}
+            <div className="space-y-1.5 landscape-mobile:space-y-0.5">
+              <div className="flex items-center gap-1.5 text-gray-300">
+                <Eye size={12} className="landscape-mobile:w-2.5 landscape-mobile:h-2.5" />
+                <span className="text-xs landscape-mobile:text-[10px]">折射系数</span>
+                <span className="ml-auto text-[10px] text-gray-400">{detailPageState.surfaceObservation.refractionCoefficient.toFixed(1)}</span>
+              </div>
+              <input type="range" min="0.1" max="2.0" step="0.1" value={detailPageState.surfaceObservation.refractionCoefficient}
+                onChange={(e) => setSurfaceObservation({ refractionCoefficient: parseFloat(e.target.value) })}
+                className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500" />
+            </div>
+
+            {/* 标记大小 */}
+            <div className="space-y-1.5 landscape-mobile:space-y-0.5">
+              <div className="flex items-center gap-1.5 text-gray-300">
+                <Maximize2 size={12} className="landscape-mobile:w-2.5 landscape-mobile:h-2.5" />
+                <span className="text-xs landscape-mobile:text-[10px]">标记大小</span>
+                <span className="ml-auto text-[10px] text-gray-400">{detailPageState.surfaceObservation.markerSizeScale.toFixed(1)}</span>
+              </div>
+              <input type="range" min="0.5" max="3.0" step="0.1" value={detailPageState.surfaceObservation.markerSizeScale}
+                onChange={(e) => setSurfaceObservation({ markerSizeScale: parseFloat(e.target.value) })}
+                className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500" />
+            </div>
+
+            {/* 星座显示 */}
+            <label className="flex items-center gap-1.5 cursor-pointer landscape-mobile:col-span-2">
+              <input type="checkbox" checked={detailPageState.surfaceObservation.showConstellations}
+                onChange={(e) => setSurfaceObservation({ showConstellations: e.target.checked })}
+                className="accent-blue-500" />
+              <span className="text-gray-300 text-xs landscape-mobile:text-[10px]">星座显示</span>
+            </label>
+
+            {/* 星座线宽 */}
+            <div className="space-y-1.5 landscape-mobile:space-y-0.5">
+              <div className="flex items-center gap-1.5 text-gray-300">
+                <Minimize2 size={12} className="landscape-mobile:w-2.5 landscape-mobile:h-2.5" />
+                <span className="text-xs landscape-mobile:text-[10px]">星座线宽</span>
+                <span className="ml-auto text-[10px] text-gray-400">{detailPageState.surfaceObservation.constellationLineWidth.toFixed(1)}</span>
+              </div>
+              <input type="range" min="0.5" max="5.0" step="0.5" value={detailPageState.surfaceObservation.constellationLineWidth}
+                onChange={(e) => setSurfaceObservation({ constellationLineWidth: parseFloat(e.target.value) })}
+                className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500" />
+            </div>
+
+            {/* 黄道显示 */}
+            <label className="flex items-center gap-1.5 cursor-pointer landscape-mobile:col-span-2">
+              <input type="checkbox" checked={detailPageState.surfaceObservation.showEcliptic}
+                onChange={(e) => setSurfaceObservation({ showEcliptic: e.target.checked })}
+                className="accent-blue-500" />
+              <span className="text-gray-300 text-xs landscape-mobile:text-[10px]">黄道显示</span>
+            </label>
+
+            {/* 黄道线宽 */}
+            <div className="space-y-1.5 landscape-mobile:space-y-0.5">
+              <div className="flex items-center gap-1.5 text-gray-300">
+                <Minimize2 size={12} className="landscape-mobile:w-2.5 landscape-mobile:h-2.5" />
+                <span className="text-xs landscape-mobile:text-[10px]">黄道线宽</span>
+                <span className="ml-auto text-[10px] text-gray-400">{detailPageState.surfaceObservation.eclipticLineWidth.toFixed(1)}</span>
+              </div>
+              <input type="range" min="0.5" max="5.0" step="0.5" value={detailPageState.surfaceObservation.eclipticLineWidth}
+                onChange={(e) => setSurfaceObservation({ eclipticLineWidth: parseFloat(e.target.value) })}
+                className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500" />
+            </div>
+
+            {/* 地平线显示 */}
+            <label className="flex items-center gap-1.5 cursor-pointer landscape-mobile:col-span-2">
+              <input type="checkbox" checked={detailPageState.surfaceObservation.showHorizon}
+                onChange={(e) => setSurfaceObservation({ showHorizon: e.target.checked })}
+                className="accent-blue-500" />
+              <span className="text-gray-300 text-xs landscape-mobile:text-[10px]">地平线显示</span>
+            </label>
+
+            {/* FOV */}
+            <div className="space-y-1.5 landscape-mobile:space-y-0.5 landscape-mobile:col-span-2">
+              <div className="flex items-center gap-1.5 text-gray-300">
+                <Eye size={12} className="landscape-mobile:w-2.5 landscape-mobile:h-2.5" />
+                <span className="text-xs landscape-mobile:text-[10px]">视场角</span>
+                <span className="ml-auto text-[10px] text-gray-400">{detailPageState.surfaceObservation.fov}°</span>
+              </div>
+              <input type="range" min="30" max="90" step="1" value={detailPageState.surfaceObservation.fov}
+                onChange={(e) => setSurfaceObservation({ fov: parseInt(e.target.value) })}
+                className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500" />
+            </div>
+          </div>
+        </div>
+        )}
+
+        {/* 参数面板触发按钮 */}
         <button
           onClick={() => setControlsOpen(!controlsOpen)}
           className={`
             fixed z-40 transition-all duration-300 flex items-center justify-center
             bg-gray-800/80 hover:bg-gray-700 backdrop-blur-md border border-gray-700/50
-            text-gray-300 hover:text-white cursor-pointer
-            shadow-lg
-            md:top-1/2 md:-translate-y-1/2 md:right-0 md:w-8 md:h-24 md:rounded-l-lg
-            md:flex-col md:gap-2 md:text-xs
-            max-md:bottom-4 max-md:left-1/2 max-md:-translate-x-1/2 max-md:w-16 max-md:h-8 max-md:rounded-full
-            max-md:px-4 max-md:py-1 max-md:text-xs
-            ${controlsOpen ? 'max-md:hidden md:translate-x-8' : 'md:translate-x-0'}
+            text-gray-300 hover:text-white cursor-pointer shadow-lg
+            md:top-1/2 md:-translate-y-1/2 md:right-0 md:w-8 md:h-24 md:rounded-l-lg md:flex-col md:gap-2 md:text-xs
+            landscape-mobile:bottom-0 landscape-mobile:left-1/2 landscape-mobile:-translate-x-1/2 landscape-mobile:w-12 landscape-mobile:h-7 landscape-mobile:rounded-t-lg landscape-mobile:px-3 landscape-mobile:py-1
+            ${controlsOpen ? 'landscape-mobile:translate-y-full md:translate-x-8' : 'md:translate-x-0'}
           `}
         >
-          <Settings size={18} />
-          <span className="md:[writing-mode:vertical-lr] max-md:hidden">参数</span>
+          <Settings size={16} className="landscape-mobile:w-3.5 landscape-mobile:h-3.5" />
+          <span className="md:[writing-mode:vertical-lr] landscape-mobile:hidden md:inline">参数</span>
         </button>
       </>
-      )}
-
-      {/* 信息面板 - 底部 */}
-      <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 z-20">
-        <div className="bg-gray-800/85 backdrop-blur-md rounded-2xl border border-gray-700/50 px-8 py-4 max-md:px-4 max-md:py-3 shadow-2xl">
-          <div className="flex items-center max-md:flex-wrap max-md:gap-x-4 max-md:gap-y-2 max-md:justify-center">
-            <div className="text-center">
-              <div className="text-gray-400 text-xs mb-1">类型</div>
-              <div className="text-white font-semibold">{planet?.type === 'planet' ? '类地行星' : planet?.type}</div>
-            </div>
-            <div className="text-center">
-              <div className="text-gray-400 text-xs mb-1">直径</div>
-              <div className="text-white font-semibold">{planet?.diameter || '12,742 km'}</div>
-            </div>
-            <div className="text-center">
-              <div className="text-gray-400 text-xs mb-1">质量</div>
-              <div className="text-white font-semibold">{planet?.mass || '5.97e24 kg'}</div>
-            </div>
-            {!detailPageState.surfaceObservation.isSurfaceView && (
-              <>
-                <div className="text-center max-md:hidden">
-                  <div className="text-gray-400 text-xs mb-1">温度</div>
-                  <div className="text-white font-semibold">{planet?.temperature || '288 K'}</div>
-                </div>
-                <div className="text-center max-md:hidden">
-                  <div className="text-gray-400 text-xs mb-1">画质</div>
-                  <div className="text-white font-semibold">{detailPageState.qualityLevel === 'low' ? '低' : detailPageState.qualityLevel === 'medium' ? '中' : detailPageState.qualityLevel === 'high' ? '高' : '超高'}</div>
-                </div>
-              </>
-            )}
-            {detailPageState.surfaceObservation.isSurfaceView && (
-              <>
-                <div className="text-center">
-                  <div className="text-gray-400 text-xs mb-1">纬度</div>
-                  <div className="text-white font-semibold">{(detailPageState.surfaceObservation.latitude * 180 / Math.PI).toFixed(2)}°</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-gray-400 text-xs mb-1">经度</div>
-                  <div className="text-white font-semibold">{(detailPageState.surfaceObservation.longitude * 180 / Math.PI).toFixed(2)}°</div>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
     </div>
   )
 }

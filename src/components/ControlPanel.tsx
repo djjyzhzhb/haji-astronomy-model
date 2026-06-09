@@ -40,18 +40,70 @@ export default function ControlPanel({ isMobilePortrait, isMobileLandscape, isMo
 
   const timeScaleSliderRef = useRef<HTMLInputElement>(null)
 
+  const [inputValue, setInputValue] = useState<string>(timeSystem.timeScale.toFixed(1))
+
+  // 将线性 slider 值 (0-100) 转换为对数实际值 (0.1-10000)
+  // slider 0 → 0.1, slider 50 → 10, slider 100 → 10000 (对数分布)
+  const sliderToActual = (sliderValue: number): number => {
+    // log10(0.1) = -1, log10(10000) = 4 → 范围 [-1, 4] 共5个数量级
+    // slider 范围 0.1-10000 映射到 [-1, 4]
+    const logMin = Math.log10(0.1)  // -1
+    const logMax = Math.log10(10000) // 4
+    const fraction = (sliderValue - 0.1) / (10000 - 0.1)
+    const logVal = logMin + fraction * (logMax - logMin)
+    return Math.pow(10, logVal)
+  }
+
+  const actualToSlider = (actualValue: number): number => {
+    // 反变换：实际值 → slider 位置
+    const logMin = Math.log10(0.1)
+    const logMax = Math.log10(10000)
+    const logVal = Math.log10(actualValue)
+    const fraction = (logVal - logMin) / (logMax - logMin)
+    return 0.1 + fraction * (10000 - 0.1)
+  }
+
+  const actualToDisplay = (actualValue: number): string => {
+    if (actualValue >= 1000) return actualValue.toFixed(0)
+    if (actualValue >= 100) return actualValue.toFixed(0)
+    if (actualValue >= 10) return actualValue.toFixed(1)
+    if (actualValue >= 1) return actualValue.toFixed(1)
+    return actualValue.toFixed(1)
+  }
+
   const handleTogglePause = useCallback(() => {
     updateTimeSystem({ isPaused: !timeSystem.isPaused })
   }, [timeSystem.isPaused, updateTimeSystem])
 
-  const handleTimeScaleChange = useCallback((value: number) => {
-    updateTimeSystem({ timeScale: value })
+  const handleTimeScaleChange = useCallback((actualValue: number) => {
+    actualValue = Math.max(0.1, Math.min(10000, actualValue))
+    updateTimeSystem({ timeScale: actualValue })
+    setInputValue(actualToDisplay(actualValue))
   }, [updateTimeSystem])
 
+  const handleSliderChange = useCallback((sliderValue: number) => {
+    const actual = sliderToActual(sliderValue)
+    handleTimeScaleChange(actual)
+  }, [handleTimeScaleChange])
+
+  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setInputValue(e.target.value)
+  }, [])
+
+  const handleInputCommit = useCallback(() => {
+    const parsed = parseFloat(inputValue)
+    if (!isNaN(parsed) && parsed >= 0.1 && parsed <= 10000) {
+      handleTimeScaleChange(parsed)
+    } else {
+      // 无效值恢复显示
+      setInputValue(actualToDisplay(timeSystem.timeScale))
+    }
+  }, [inputValue, timeSystem.timeScale, handleTimeScaleChange])
+
   const resetTimeScale = useCallback(() => {
-    handleTimeScaleChange(1.0)
+    handleTimeScaleChange(10.0)  // 默认10 → 物理速度 1.0 本地日/秒
     if (timeScaleSliderRef.current) {
-      timeScaleSliderRef.current.value = '1'
+      timeScaleSliderRef.current.value = actualToSlider(10.0).toString()
     }
   }, [handleTimeScaleChange])
 
@@ -70,10 +122,17 @@ export default function ControlPanel({ isMobilePortrait, isMobileLandscape, isMo
     navigateToDetail(planet.id)
   }, [navigateToDetail])
 
-  const changeSpeed = useCallback((delta: number) => {
+  // 增减步长：0.1x倍数步进（对数步）
+  const changeSpeed = useCallback((direction: -1 | 1) => {
     const current = timeSystem.timeScale
-    const next = current + delta
-    handleTimeScaleChange(Math.max(0.1, Math.min(100, Math.round(next * 10) / 10)))
+    // 按十倍程移动：每一步×10^0.1 ≈ 1.2589，方便微调
+    const step = direction === 1 ? Math.pow(10, 0.1) : 1 / Math.pow(10, 0.1)
+    let next = current * step
+    next = Math.max(0.1, Math.min(10000, next))
+    handleTimeScaleChange(next)
+    if (timeScaleSliderRef.current) {
+      timeScaleSliderRef.current.value = actualToSlider(next).toString()
+    }
   }, [timeSystem.timeScale, handleTimeScaleChange])
 
   const btnBase = "rounded-lg bg-gray-800/80 hover:bg-gray-700/80 text-gray-200 transition-colors flex items-center justify-center"
@@ -94,24 +153,36 @@ export default function ControlPanel({ isMobilePortrait, isMobileLandscape, isMo
             <button onClick={handleTogglePause} className={`touch-btn p-1.5 rounded-lg transition-colors ${!timeSystem.isPaused ? 'bg-blue-600/60 text-white' : 'bg-gray-700/50 text-gray-300'}`}>
               {timeSystem.isPaused ? <Play size={14} /> : <Pause size={14} />}
             </button>
-            <span className="text-[10px] text-gray-400 font-mono">{timeSystem.timeScale.toFixed(1)}×</span>
+            <button onClick={resetTimeScale} className="text-[9px] text-gray-500 hover:text-gray-300 px-1 py-0.5 rounded bg-gray-700/30">
+              10×
+            </button>
           </div>
           <div className="flex items-center gap-1">
-            <button onClick={() => changeSpeed(-5)} className="touch-btn p-1 rounded bg-gray-700/50 text-gray-300 hover:bg-gray-600">
+            <button onClick={() => changeSpeed(-1)} className="touch-btn p-1 rounded bg-gray-700/50 text-gray-300 hover:bg-gray-600">
               <Rewind size={12} />
             </button>
             <input
               ref={timeScaleSliderRef}
               type="range"
-              min="0.1" max="100" step="0.1"
-              defaultValue={timeSystem.timeScale}
-              onChange={(e) => handleTimeScaleChange(parseFloat(e.target.value))}
+              min="0.1" max="10000" step="0.1"
+              defaultValue={actualToSlider(timeSystem.timeScale)}
+              onChange={(e) => handleSliderChange(parseFloat(e.target.value))}
               className="flex-1 h-6 accent-blue-400"
             />
-            <button onClick={() => changeSpeed(5)} className="touch-btn p-1 rounded bg-gray-700/50 text-gray-300 hover:bg-gray-600">
+            <button onClick={() => changeSpeed(1)} className="touch-btn p-1 rounded bg-gray-700/50 text-gray-300 hover:bg-gray-600">
               <FastForward size={12} />
             </button>
           </div>
+          <input
+            type="text"
+            inputMode="decimal"
+            value={inputValue}
+            onChange={handleInputChange}
+            onBlur={handleInputCommit}
+            onKeyDown={(e) => e.key === 'Enter' && handleInputCommit()}
+            className="w-full text-center text-[11px] bg-gray-800/50 border border-gray-600/40 rounded px-1 py-0.5 text-gray-200 font-mono focus:outline-none focus:border-blue-400"
+            placeholder="0.1-10000"
+          />
         </div>
 
         {/* 视图控制 */}
@@ -186,24 +257,24 @@ export default function ControlPanel({ isMobilePortrait, isMobileLandscape, isMo
           </button>
 
           <div className="flex items-center gap-1.5 flex-1 min-w-0">
-            <button onClick={() => changeSpeed(-5)} className="touch-btn p-1.5 rounded bg-gray-700/40 text-gray-300 hover:bg-gray-600/50">
+            <button onClick={() => changeSpeed(-1)} className="touch-btn p-1.5 rounded bg-gray-700/40 text-gray-300 hover:bg-gray-600/50">
               <Rewind size={13} />
             </button>
             <input
               ref={timeScaleSliderRef}
               type="range"
-              min="0.1" max="100" step="0.1"
-              defaultValue={timeSystem.timeScale}
-              onChange={(e) => handleTimeScaleChange(parseFloat(e.target.value))}
+              min="0.1" max="10000" step="0.1"
+              defaultValue={actualToSlider(timeSystem.timeScale)}
+              onChange={(e) => handleSliderChange(parseFloat(e.target.value))}
               className="flex-1 h-7 accent-blue-400"
               style={{ touchAction: 'none' }}
             />
-            <button onClick={() => changeSpeed(5)} className="touch-btn p-1.5 rounded bg-gray-700/40 text-gray-300 hover:bg-gray-600/50">
+            <button onClick={() => changeSpeed(1)} className="touch-btn p-1.5 rounded bg-gray-700/40 text-gray-300 hover:bg-gray-600/50">
               <FastForward size={13} />
             </button>
-            <span className="text-[10px] text-gray-400 font-mono w-10 text-right shrink-0 tabular-nums">
-              {timeSystem.timeScale.toFixed(1)}×
-            </span>
+            <button onClick={resetTimeScale} className="text-[10px] text-gray-500 hover:text-gray-300 px-1.5 py-0.5 rounded bg-gray-700/30 shrink-0">
+              10×
+            </button>
           </div>
 
           <button onClick={() => setMobileExpanded(!mobileExpanded)}
@@ -218,6 +289,20 @@ export default function ControlPanel({ isMobilePortrait, isMobileLandscape, isMo
           ${mobileExpanded ? 'max-h-[55vh] opacity-100 py-1' : 'max-h-0 opacity-0 py-0'}
         `} style={{ pointerEvents: mobileExpanded ? 'auto' : 'none' }}>
           
+          {/* 手动输入 */}
+          <div className="px-3 py-1">
+            <input
+              type="text"
+              inputMode="decimal"
+              value={inputValue}
+              onChange={handleInputChange}
+              onBlur={handleInputCommit}
+              onKeyDown={(e) => e.key === 'Enter' && handleInputCommit()}
+              className="w-full text-center text-xs bg-gray-800/50 border border-gray-600/40 rounded px-2 py-1 text-gray-200 font-mono focus:outline-none focus:border-blue-400"
+              placeholder="输入 0.1-10000"
+            />
+          </div>
+
           {/* 天体列表 */}
           <div className="px-3 py-1.5">
             <div className="text-[10px] text-gray-500 mb-1.5">天体</div>
@@ -290,23 +375,21 @@ export default function ControlPanel({ isMobilePortrait, isMobileLandscape, isMo
             <Rewind size={14} />
           </button>
 
-          <div className="flex items-center gap-2 flex-1 max-w-[300px]">
-            <span className="text-xs text-gray-400 font-mono w-12 text-right tabular-nums">
-              {timeSystem.timeScale.toFixed(1)}×
+          <div className="flex items-center gap-2 flex-1 max-w-[400px]">
+            <span className="text-xs text-gray-400 font-mono w-14 text-right tabular-nums">
+              {actualToDisplay(timeSystem.timeScale)}×
             </span>
             <input
               ref={timeScaleSliderRef}
               type="range"
-              min="0.1"
-              max="100"
-              step="0.1"
-              defaultValue={timeSystem.timeScale}
-              onChange={(e) => handleTimeScaleChange(parseFloat(e.target.value))}
+              min="0.1" max="10000" step="0.1"
+              defaultValue={actualToSlider(timeSystem.timeScale)}
+              onChange={(e) => handleSliderChange(parseFloat(e.target.value))}
               className="flex-1 h-1.5 accent-blue-400 cursor-pointer"
             />
             <button onClick={resetTimeScale}
               className="text-xs text-gray-500 hover:text-gray-300 px-1.5 py-0.5 rounded bg-gray-700/30 hover:bg-gray-600/50 transition-colors">
-              1×
+              10×
             </button>
           </div>
 
@@ -314,6 +397,19 @@ export default function ControlPanel({ isMobilePortrait, isMobileLandscape, isMo
             className="p-1.5 rounded-lg bg-gray-700/50 hover:bg-gray-600/70 text-gray-300 transition-colors">
             <FastForward size={14} />
           </button>
+
+          <div className="flex items-center gap-1">
+            <input
+              type="text"
+              inputMode="decimal"
+              value={inputValue}
+              onChange={handleInputChange}
+              onBlur={handleInputCommit}
+              onKeyDown={(e) => e.key === 'Enter' && handleInputCommit()}
+              className="w-16 text-center text-xs bg-gray-800/50 border border-gray-600/40 rounded px-1.5 py-0.5 text-gray-200 font-mono focus:outline-none focus:border-blue-400"
+              placeholder="值"
+            />
+          </div>
 
           <div className="w-px h-5 bg-gray-600/40" />
 

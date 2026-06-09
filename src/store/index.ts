@@ -7,7 +7,7 @@ import { setHash } from '../utils/router'
 // 时间系统默认参数（来自设定文件）
 const defaultTimeSystem: TimeSystem = {
   T: 0,
-  timeScale: 1,
+  timeScale: 10,   // 默认10，映射为旧值1的实际速度（timeScale/10作为物理速度）
   isPaused: false,
   localDayHours: 24.15,
   localYearDays: 426.15,

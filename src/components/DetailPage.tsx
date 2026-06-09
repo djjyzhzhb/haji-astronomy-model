@@ -672,12 +672,12 @@ function DetailScene({ viewPreset, customTexture }: { viewPreset: ViewPreset; cu
   const orbitControlsRef = useRef<any>(null)
   const { camera } = useThree()
   
-  // 时间自动推进（使用 getState 读取最新值，避免闭包陈旧）
-  // 与 Scene.tsx 统一：delta(秒) × timeScale = 每帧推进的本地日数
+  // 时间自动推进（与 Scene.tsx 统一：delta(秒) × timeScale / 10 = 帧推进的本地日数）
+  // timeScale=10 时物理速度 = 旧值 1.0（1本地日/秒）
   useFrame((_state, delta) => {
     const ts = useStore.getState().timeSystem
     if (!ts.isPaused) {
-      const dtDays = delta * ts.timeScale
+      const dtDays = delta * ts.timeScale / 10
       updateTimeSystem({ T: ts.T + dtDays })
     }
   })

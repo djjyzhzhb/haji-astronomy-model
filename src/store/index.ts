@@ -132,6 +132,7 @@ const defaultCelestialBodies: CelestialBody[] = [
     radius: 1.6, // 合理推测：红色行星（10000km/6000≈1.67）
     distance: 35, // 无依据（占位）
     rotationSpeed: 0.018,
+    orbitalPeriodDays: 855.1, // 开普勒第三定律：426.15 × (35/22)^(3/2)
     color: '#cd5c5c',
     description: '一颗干燥的红色星球，拥有极地冰盖。设定文件未提及，此行星为推测性扩展。',
     mass: '0.5 M⊕',
@@ -148,6 +149,7 @@ const defaultCelestialBodies: CelestialBody[] = [
     radius: 6.0, // 合理推测：气态巨星（40000km/6000≈6.67，取整）
     distance: 60, // 无依据（占位）
     rotationSpeed: 0.04,
+    orbitalPeriodDays: 1919.1, // 开普勒第三定律：426.15 × (60/22)^(3/2)
     color: '#daa520',
     description: '巨大的气态行星，拥有标志性的风暴系统。设定文件未提及，此行星为推测性扩展。',
     mass: '300 M⊕',

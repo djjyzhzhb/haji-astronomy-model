@@ -7,7 +7,7 @@ import Moon from './Moon'
 import Orbit from './Orbit'
 import { getTextureByType } from '../utils/textureGenerator'
 import { usePlanetTexture, getIsHabitable } from '../utils/planetTextureCache'
-import { calculateOrbitalPositionScaled } from '../utils/keplerOrbit'
+import { calculateOrbitalPositionFromT, calculateOrbitalPositionScaled } from '../utils/keplerOrbit'
 
 // 环着色器 — 全3D光照 + 相位梯度（迎光面亮→背光面暗）
 const ringVertexShader = /* glsl */ `
@@ -137,8 +137,14 @@ function Planet({ body, moons }: PlanetProps) {
     const T = useStore.getState().timeSystem.T
 
     if (groupRef.current && body.orbitalElements) {
-      const pos = calculateOrbitalPositionScaled(T, body.orbitalElements, distanceScale, 50)
-      groupRef.current.position.set(pos.x, pos.y, pos.z)
+      let pos: { x: number; y: number; z: number }
+      if (body.orbitalPeriodDays) {
+        pos = calculateOrbitalPositionFromT(T, body.orbitalPeriodDays, body.orbitalElements)
+        groupRef.current.position.set(pos.x * distanceScale, pos.y * distanceScale, pos.z * distanceScale)
+      } else {
+        pos = calculateOrbitalPositionScaled(T, body.orbitalElements, distanceScale, 50)
+        groupRef.current.position.set(pos.x, pos.y, pos.z)
+      }
     } else if (groupRef.current && body.distance && body.orbitSpeed) {
       const angle = T * body.orbitSpeed * 0.1
       groupRef.current.position.x = Math.cos(angle) * body.distance * distanceScale

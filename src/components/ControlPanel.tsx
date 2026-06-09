@@ -1,314 +1,332 @@
-import { useState } from 'react'
-import { Play, Pause, FastForward, Rewind, Eye, EyeOff, Sun, Crosshair, Monitor, Palette, Sparkles, Settings2, Maximize2, MoveVertical, Zap, Lightbulb, Star, Layers, Circle, Cloud, Moon } from 'lucide-react'
+import { useState, useCallback, useRef } from 'react'
 import { useStore } from '../store'
+import {
+  Play, Pause, FastForward, Rewind, ChevronUp,
+  Settings, Globe, Eye, Maximize2, Minimize2,
+  CircleOff, Gauge
+} from 'lucide-react'
+import type { CelestialBody } from '../types'
 
-function ControlPanel() {
-  const { 
-    timeSystem, showOrbits, focusBody, brightness, 
-    backgroundBrightness, backgroundColor, showNebula,
-    distanceScale, sizeScale, lightIntensity, ambientLight, starGlow,
-    showAtmosphere, showRings, showAsteroids, showDustCloud, showShadows,
+interface ControlPanelProps {
+  isMobilePortrait: boolean
+}
+
+export default function ControlPanel({ isMobilePortrait }: ControlPanelProps) {
+  const {
     celestialBodies,
-    updateTimeSystem, toggleOrbits, setFocusBody, 
-    setBrightness, setBackgroundBrightness, setBackgroundColor, setShowNebula,
-    setDistanceScale, setSizeScale, setLightIntensity, setAmbientLight, setStarGlow,
-    setShowAtmosphere, setShowRings, setShowAsteroids, setShowDustCloud, setShowShadows
+    timeSystem,
+    updateTimeSystem,
+    distanceScale,
+    setDistanceScale,
+    showOrbits,
+    toggleOrbits,
+    selectedBody,
+    selectBody,
+    setFocusBody,
+    showNebula,
+    setShowNebula,
+    showAtmosphere,
+    setShowAtmosphere,
+    showRings,
+    setShowRings,
+    showDustCloud,
+    setShowDustCloud,
+    navigateToDetail,
   } = useStore()
 
-  const [expanded, setExpanded] = useState(false)
-  const [visualExpanded, setVisualExpanded] = useState(false)
+  const [mobileExpanded, setMobileExpanded] = useState(false)
+  const [showFocusPanel, setShowFocusPanel] = useState(false)
+  const [showVisualPanel, setShowVisualPanel] = useState(false)
 
-  const presets = [
-    { name: '深空', color: '#0a0a1a' },
-    { name: '深蓝', color: '#0f172a' },
-  ]
+  const timeScaleSliderRef = useRef<HTMLInputElement>(null)
 
-  const adjustTimeScale = (delta: number) => {
-    updateTimeSystem({ timeScale: Math.max(0.1, Math.min(100, timeSystem.timeScale + delta)) })
-  }
+  const handleTogglePause = useCallback(() => {
+    updateTimeSystem({ isPaused: !timeSystem.isPaused })
+  }, [timeSystem.isPaused, updateTimeSystem])
 
-  return (
-    <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
-      {expanded && (
-        <div className="mb-2 bg-gray-900/95 backdrop-blur-sm rounded-xl border border-gray-700/50 p-3 min-w-0 w-[400px] max-md:w-[calc(100vw-1rem)] max-md:p-2">
-          <div className="grid grid-cols-2 gap-3 max-md:gap-1.5">
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-xs text-gray-400">
-                <Maximize2 size={12} />
-                <span>距离缩放</span>
-              </div>
-              <input
-                type="range"
-                min="0.2"
-                max="3"
-                step="0.1"
-                value={distanceScale}
-                onChange={(e) => setDistanceScale(parseFloat(e.target.value))}
-                className="w-full accent-blue-500 h-1.5"
+  const handleTimeScaleChange = useCallback((value: number) => {
+    updateTimeSystem({ timeScale: value })
+  }, [updateTimeSystem])
+
+  const resetTimeScale = useCallback(() => {
+    handleTimeScaleChange(1.0)
+    if (timeScaleSliderRef.current) {
+      timeScaleSliderRef.current.value = '1'
+    }
+  }, [handleTimeScaleChange])
+
+  const handleFocusBody = useCallback((body: CelestialBody) => {
+    selectBody(body)
+    if (body.id === 'planet-1') {
+      const planet = celestialBodies.find(b => b.id === body.id)
+      if (planet) {
+        setDistanceScale(Math.min(5, Math.max(0.5, ((planet.radius * 15) / 50))))
+      }
+    }
+    setFocusBody(body)
+  }, [selectBody, celestialBodies, setFocusBody, setDistanceScale])
+
+  const handlePlanetClick = useCallback((planet: CelestialBody) => {
+    navigateToDetail(planet.id)
+  }, [navigateToDetail])
+
+  const changeSpeed = useCallback((delta: number) => {
+    const current = timeSystem.timeScale
+    const next = current + delta
+    handleTimeScaleChange(Math.max(0.1, Math.min(100, Math.round(next * 10) / 10)))
+  }, [timeSystem.timeScale, handleTimeScaleChange])
+
+  const btnBase = "rounded-lg bg-gray-800/80 hover:bg-gray-700/80 text-gray-200 transition-colors flex items-center justify-center"
+  const btnSmall = `${btnBase} p-1.5 min-w-[36px] min-h-[36px]`
+  const btnSmActive = (active: boolean) => `${btnSmall} ${active ? 'bg-blue-600/70 ring-1 ring-blue-400' : ''}`
+
+  const planets = celestialBodies.filter((b) =>
+    b.type === 'planet' || b.type === 'moon'
+  )
+
+  // ─── 移动端竖屏布局 ───
+  if (isMobilePortrait) {
+    return (
+      <div className={`
+        relative bg-gray-900/95 border-t border-gray-700/50 safe-bottom
+        transition-all duration-300 ease-in-out
+        ${mobileExpanded ? 'flex-1' : 'h-[14vh]'}
+      `}>
+        <div className="flex items-center justify-between px-3 py-1.5 border-b border-gray-700/30">
+          <div className="flex items-center gap-2">
+            <button onClick={handleTogglePause} className={btnSmActive(!timeSystem.isPaused)}>
+              {timeSystem.isPaused ? <Play size={16} /> : <Pause size={16} />}
+            </button>
+            <button onClick={() => changeSpeed(-1)} className={btnSmall}>
+              <Rewind size={14} />
+            </button>
+            <button onClick={() => changeSpeed(1)} className={btnSmall}>
+              <FastForward size={14} />
+            </button>
+            <span className="text-xs text-gray-400 font-mono ml-1">
+              {timeSystem.timeScale.toFixed(1)}×
+            </span>
+          </div>
+
+          <div className="text-xs text-gray-300 truncate max-w-[30vw]">
+            {selectedBody ? `🔭 ${selectedBody.name}` : '浏览模式'}
+          </div>
+
+          <div className="flex items-center gap-1">
+            <button onClick={() => setShowFocusPanel(!showFocusPanel)}
+              className={btnSmActive(showFocusPanel)}>
+              <Globe size={15} />
+            </button>
+            <button onClick={() => setShowVisualPanel(!showVisualPanel)}
+              className={btnSmActive(showVisualPanel)}>
+              <Eye size={15} />
+            </button>
+            <button onClick={() => setMobileExpanded(!mobileExpanded)}
+              className={`${btnSmall} ${mobileExpanded ? 'bg-blue-600/50' : ''}`}>
+              <ChevronUp size={16}
+                style={{ transform: mobileExpanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.3s' }}
               />
-              <div className="text-xs text-gray-500 text-right">{distanceScale.toFixed(1)}x</div>
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-xs text-gray-400">
-                <MoveVertical size={12} />
-                <span>大小缩放</span>
-              </div>
-              <input
-                type="range"
-                min="0.2"
-                max="3"
-                step="0.1"
-                value={sizeScale}
-                onChange={(e) => setSizeScale(parseFloat(e.target.value))}
-                className="w-full accent-purple-500 h-1.5"
-              />
-              <div className="text-xs text-gray-500 text-right">{sizeScale.toFixed(1)}x</div>
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-xs text-gray-400">
-                <Sun size={12} />
-                <span>场景亮度</span>
-              </div>
-              <input
-                type="range"
-                min="0.5"
-                max="3"
-                step="0.1"
-                value={brightness}
-                onChange={(e) => setBrightness(parseFloat(e.target.value))}
-                className="w-full accent-yellow-500 h-1.5"
-              />
-              <div className="text-xs text-gray-500 text-right">{brightness.toFixed(1)}x</div>
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-xs text-gray-400">
-                <Monitor size={12} />
-                <span>背景亮度</span>
-              </div>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.05"
-                value={backgroundBrightness}
-                onChange={(e) => setBackgroundBrightness(parseFloat(e.target.value))}
-                className="w-full accent-cyan-500 h-1.5"
-              />
-              <div className="text-xs text-gray-500 text-right">{(backgroundBrightness * 100).toFixed(0)}%</div>
-            </div>
+            </button>
           </div>
         </div>
-      )}
 
-      {visualExpanded && (
-        <div className="mb-2 bg-gray-900/95 backdrop-blur-sm rounded-xl border border-gray-700/50 p-3 min-w-0 w-[400px] max-md:w-[calc(100vw-1rem)] max-md:p-2">
-          <div className="grid grid-cols-2 gap-3 max-md:gap-1.5">
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-xs text-gray-400">
-                <Zap size={12} />
-                <span>光照强度</span>
-              </div>
-              <input
-                type="range"
-                min="0.2"
-                max="3"
-                step="0.1"
-                value={lightIntensity}
-                onChange={(e) => setLightIntensity(parseFloat(e.target.value))}
-                className="w-full accent-orange-500 h-1.5"
-              />
-              <div className="text-xs text-gray-500 text-right">{lightIntensity.toFixed(1)}x</div>
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-xs text-gray-400">
-                <Lightbulb size={12} />
-                <span>环境光</span>
-              </div>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.05"
-                value={ambientLight}
-                onChange={(e) => setAmbientLight(parseFloat(e.target.value))}
-                className="w-full accent-amber-500 h-1.5"
-              />
-              <div className="text-xs text-gray-500 text-right">{(ambientLight * 100).toFixed(0)}%</div>
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-xs text-gray-400">
-                <Star size={12} />
-                <span>恒星光晕</span>
-              </div>
-              <input
-                type="range"
-                min="0"
-                max="2"
-                step="0.1"
-                value={starGlow}
-                onChange={(e) => setStarGlow(parseFloat(e.target.value))}
-                className="w-full accent-yellow-400 h-1.5"
-              />
-              <div className="text-xs text-gray-500 text-right">{starGlow.toFixed(1)}x</div>
-            </div>
-          </div>
-
-          <div className="mt-3 pt-3 border-t border-gray-700">
-            <div className="text-xs text-gray-400 mb-2">显示选项</div>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={() => setShowAtmosphere(!showAtmosphere)}
-                className={`flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs transition-colors ${showAtmosphere ? 'bg-blue-600/30 text-blue-300' : 'bg-gray-800/50 text-gray-400 hover:bg-gray-700/50'}`}
-              >
-                <Cloud size={14} />
-                <span>大气层</span>
-              </button>
-              <button
-                onClick={() => setShowRings(!showRings)}
-                className={`flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs transition-colors ${showRings ? 'bg-purple-600/30 text-purple-300' : 'bg-gray-800/50 text-gray-400 hover:bg-gray-700/50'}`}
-              >
-                <Circle size={14} />
-                <span>行星环</span>
-              </button>
-              <button
-                onClick={() => setShowAsteroids(!showAsteroids)}
-                className={`flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs transition-colors ${showAsteroids ? 'bg-gray-600/30 text-gray-300' : 'bg-gray-800/50 text-gray-400 hover:bg-gray-700/50'}`}
-              >
-                <Layers size={14} />
-                <span>小行星带</span>
-              </button>
-              <button
-                onClick={() => setShowDustCloud(!showDustCloud)}
-                className={`flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs transition-colors ${showDustCloud ? 'bg-cyan-600/30 text-cyan-300' : 'bg-gray-800/50 text-gray-400 hover:bg-gray-700/50'}`}
-              >
-                <Cloud size={14} />
-                <span>尘埃云</span>
-              </button>
-              <button
-                onClick={() => setShowShadows(!showShadows)}
-                className={`flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs transition-colors ${showShadows ? 'bg-gray-600/30 text-gray-300' : 'bg-gray-800/50 text-gray-400 hover:bg-gray-700/50'}`}
-              >
-                <Moon size={14} />
-                <span>阴影</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="bg-gray-900/95 backdrop-blur-sm rounded-xl border border-gray-700/50 p-2 flex items-center gap-2 max-md:gap-1 max-md:px-1 max-md:py-1">
-        <button
-          onClick={() => updateTimeSystem({ isPaused: !timeSystem.isPaused })}
-          className="p-2 hover:bg-gray-700 rounded-lg transition-colors text-white"
-          title={timeSystem.isPaused ? '播放' : '暂停'}
-        >
-          {timeSystem.isPaused ? <Play size={18} /> : <Pause size={18} />}
-        </button>
-
-        <button
-          onClick={() => adjustTimeScale(-0.5)}
-          className="p-2 hover:bg-gray-700 rounded-lg transition-colors text-white"
-          title="减速"
-        >
-          <Rewind size={18} />
-        </button>
-
-        <div className="flex items-center gap-1 bg-gray-800/50 rounded-lg px-2 py-1 max-md:w-12">
+        <div className="px-3 py-1.5 flex items-center gap-2">
+          <span className="text-[10px] text-gray-500 shrink-0">流速</span>
           <input
+            ref={timeScaleSliderRef}
             type="range"
             min="0.1"
             max="100"
             step="0.1"
-            value={timeSystem.timeScale}
-            onChange={(e) => updateTimeSystem({ timeScale: parseFloat(e.target.value) })}
-            className="w-16 max-md:w-10 accent-blue-500 h-1.5"
+            defaultValue={timeSystem.timeScale}
+            onChange={(e) => handleTimeScaleChange(parseFloat(e.target.value))}
+            className="flex-1 h-8 accent-blue-400"
+            style={{ touchAction: 'none' }}
           />
-          <span className="text-white text-xs w-8">{timeSystem.timeScale.toFixed(1)}x</span>
+          <button onClick={resetTimeScale} className="text-[10px] text-gray-500 px-1.5 py-0.5 rounded bg-gray-800 hover:bg-gray-700">
+            1×
+          </button>
         </div>
 
-        <button
-          onClick={() => adjustTimeScale(0.5)}
-          className="p-2 hover:bg-gray-700 rounded-lg transition-colors text-white"
-          title="加速"
-        >
-          <FastForward size={18} />
-        </button>
+        <div className={`overflow-y-auto transition-all duration-300 ${mobileExpanded ? 'max-h-[50vh] opacity-100' : 'max-h-0 opacity-0'}`}
+          style={{ pointerEvents: mobileExpanded ? 'auto' : 'none' }}>
+          
+          <div className="px-3 py-2">
+            <div className="text-[11px] text-gray-500 mb-1.5">天体聚焦</div>
+            <div className="grid grid-cols-4 gap-1.5">
+              {planets.map((planet) => (
+                <button
+                  key={planet.id}
+                  onClick={() => handlePlanetClick(planet)}
+                  className={`
+                    py-1.5 px-1 rounded-lg text-[11px] leading-tight text-center transition-all
+                    ${selectedBody?.id === planet.id
+                      ? 'bg-blue-600/80 text-white ring-1 ring-blue-400'
+                      : 'bg-gray-800/60 text-gray-300 hover:bg-gray-700/60'}
+                  `}
+                >
+                  {planet.name}
+                </button>
+              ))}
+            </div>
+          </div>
 
-        <div className="w-px h-6 bg-gray-700 mx-1" />
+          {showFocusPanel && (
+            <div className="px-3 py-2 border-t border-gray-700/30">
+              <div className="text-[11px] text-gray-400 mb-1.5">视图控制</div>
+              <div className="flex flex-wrap gap-1.5">
+                <button onClick={() => { setFocusBody(selectedBody!); setShowFocusPanel(false) }}
+                  className="px-2 py-1 rounded text-[11px] bg-gray-800 text-gray-300 hover:bg-gray-700">
+                  聚焦选中
+                </button>
+                <button onClick={() => { setFocusBody(null); selectBody(null); setShowFocusPanel(false) }}
+                  className="px-2 py-1 rounded text-[11px] bg-gray-800 text-gray-300 hover:bg-gray-700">
+                  全景视图
+                </button>
+                <button onClick={() => setDistanceScale(Math.max(0.5, distanceScale - 1))}
+                  className="px-2 py-1 rounded text-[11px] bg-gray-800 text-gray-300 hover:bg-gray-700">
+                  <Minimize2 size={12} className="inline mr-1" />缩小
+                </button>
+                <button onClick={() => setDistanceScale(Math.min(20, distanceScale + 1))}
+                  className="px-2 py-1 rounded text-[11px] bg-gray-800 text-gray-300 hover:bg-gray-700">
+                  <Maximize2 size={12} className="inline mr-1" />放大
+                </button>
+              </div>
+            </div>
+          )}
 
-        <button
-          onClick={toggleOrbits}
-          className="p-2 hover:bg-gray-700 rounded-lg transition-colors text-white"
-          title={showOrbits ? '隐藏轨道' : '显示轨道'}
-        >
-          {showOrbits ? <Eye size={18} /> : <EyeOff size={18} />}
-        </button>
+          {showVisualPanel && (
+            <div className="px-3 py-2 border-t border-gray-700/30">
+              <div className="text-[11px] text-gray-400 mb-1.5">显示选项</div>
+              <div className="flex flex-wrap gap-1.5">
+                <button onClick={toggleOrbits} className={btnSmActive(showOrbits)}>
+                  <CircleOff size={13} />
+                </button>
+                <button onClick={() => setShowNebula(!showNebula)} className={btnSmActive(showNebula)}>
+                  <Settings size={13} />
+                </button>
+                <button onClick={() => setShowAtmosphere(!showAtmosphere)} className={btnSmActive(showAtmosphere)}>
+                  <Gauge size={13} />
+                </button>
+                <button onClick={() => setShowRings(!showRings)} className={btnSmActive(showRings)}>
+                  <Globe size={13} />
+                </button>
+                <button onClick={() => setShowDustCloud(!showDustCloud)} className={btnSmActive(showDustCloud)}>
+                  <CircleOff size={13} />
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
 
-        <button
-          onClick={() => setShowNebula(!showNebula)}
-          className={`p-2 rounded-lg transition-colors text-white ${showNebula ? 'bg-purple-600/30 text-purple-300' : 'hover:bg-gray-700'}`}
-          title={showNebula ? '隐藏星云' : '显示星云'}
-        >
-          <Sparkles size={18} />
-        </button>
+  // ─── 桌面端布局 ───
+  return (
+    <div className="absolute bottom-0 left-0 right-0 z-30">
+      <div className="bg-gray-900/85 backdrop-blur-sm border-t border-gray-700/50 px-3 py-2">
+        <div className="flex items-center gap-3 max-w-screen-xl mx-auto">
+          <button onClick={handleTogglePause}
+            className={`p-1.5 rounded-lg transition-colors ${timeSystem.isPaused ? 'bg-blue-600/60 hover:bg-blue-600/80 text-white' : 'bg-gray-700/50 hover:bg-gray-600/70 text-gray-300'}`}>
+            {timeSystem.isPaused ? <Play size={15} /> : <Pause size={15} />}
+          </button>
 
-        <div className="w-px h-6 bg-gray-700 mx-1 max-md:hidden" />
+          <button onClick={() => changeSpeed(-1)}
+            className="p-1.5 rounded-lg bg-gray-700/50 hover:bg-gray-600/70 text-gray-300 transition-colors">
+            <Rewind size={14} />
+          </button>
 
-        <select
-          value={focusBody?.id || ''}
-          onChange={(e) => {
-            const body = celestialBodies.find(b => b.id === e.target.value)
-            setFocusBody(body || null)
-          }}
-          className="bg-gray-800/50 text-white px-2 py-1 rounded-lg text-xs border border-gray-700 focus:border-blue-500 focus:outline-none min-w-[100px] max-md:hidden"
-        >
-          <option value="">全景</option>
-          {celestialBodies.map(body => (
-            <option key={body.id} value={body.id}>{body.name}</option>
-          ))}
-        </select>
-
-        <div className="w-px h-6 bg-gray-700 mx-1 max-md:hidden" />
-
-        <div className="flex gap-1 max-md:hidden">
-          {presets.map((preset) => (
-            <button
-              key={preset.name}
-              onClick={() => setBackgroundColor(preset.color)}
-              className={`w-6 h-6 rounded-full border-2 transition-all ${
-                backgroundColor === preset.color ? 'border-white scale-110' : 'border-gray-600 hover:scale-105'
-              }`}
-              style={{ backgroundColor: preset.color }}
-              title={preset.name}
+          <div className="flex items-center gap-2 flex-1 max-w-[300px]">
+            <span className="text-xs text-gray-400 font-mono w-12 text-right tabular-nums">
+              {timeSystem.timeScale.toFixed(1)}×
+            </span>
+            <input
+              ref={timeScaleSliderRef}
+              type="range"
+              min="0.1"
+              max="100"
+              step="0.1"
+              defaultValue={timeSystem.timeScale}
+              onChange={(e) => handleTimeScaleChange(parseFloat(e.target.value))}
+              className="flex-1 h-1.5 accent-blue-400 cursor-pointer"
             />
-          ))}
+            <button onClick={resetTimeScale}
+              className="text-xs text-gray-500 hover:text-gray-300 px-1.5 py-0.5 rounded bg-gray-700/30 hover:bg-gray-600/50 transition-colors">
+              1×
+            </button>
+          </div>
+
+          <button onClick={() => changeSpeed(1)}
+            className="p-1.5 rounded-lg bg-gray-700/50 hover:bg-gray-600/70 text-gray-300 transition-colors">
+            <FastForward size={14} />
+          </button>
+
+          <div className="w-px h-5 bg-gray-600/40" />
+
+          <button onClick={() => setDistanceScale(Math.max(0.5, distanceScale - 1))}
+            className="p-1.5 rounded-lg bg-gray-700/50 hover:bg-gray-600/70 text-gray-300 transition-colors" title="缩小">
+            <Minimize2 size={14} />
+          </button>
+          <button onClick={() => setDistanceScale(Math.min(20, distanceScale + 1))}
+            className="p-1.5 rounded-lg bg-gray-700/50 hover:bg-gray-600/70 text-gray-300 transition-colors" title="放大">
+            <Maximize2 size={14} />
+          </button>
+
+          <div className="w-px h-5 bg-gray-600/40" />
+
+          <button onClick={toggleOrbits}
+            className={`p-1.5 rounded-lg transition-colors ${showOrbits ? 'bg-blue-600/60 hover:bg-blue-600/80 text-white' : 'bg-gray-700/50 hover:bg-gray-600/70 text-gray-300'}`}
+            title="轨道显示">
+            <CircleOff size={14} />
+          </button>
+          <button onClick={() => setShowNebula(!showNebula)}
+            className={`p-1.5 rounded-lg transition-colors ${showNebula ? 'bg-purple-600/60 hover:bg-purple-600/80 text-white' : 'bg-gray-700/50 hover:bg-gray-600/70 text-gray-300'}`}
+            title="星云">
+            <Settings size={14} />
+          </button>
+          <button onClick={() => setShowAtmosphere(!showAtmosphere)}
+            className={`p-1.5 rounded-lg transition-colors ${showAtmosphere ? 'bg-cyan-600/60 hover:bg-cyan-600/80 text-white' : 'bg-gray-700/50 hover:bg-gray-600/70 text-gray-300'}`}
+            title="大气层">
+            <Gauge size={14} />
+          </button>
+          <button onClick={() => setShowRings(!showRings)}
+            className={`p-1.5 rounded-lg transition-colors ${showRings ? 'bg-amber-600/60 hover:bg-amber-600/80 text-white' : 'bg-gray-700/50 hover:bg-gray-600/70 text-gray-300'}`}
+            title="行星环">
+            <Globe size={14} />
+          </button>
+          <button onClick={() => setShowDustCloud(!showDustCloud)}
+            className={`p-1.5 rounded-lg transition-colors ${showDustCloud ? 'bg-rose-600/60 hover:bg-rose-600/80 text-white' : 'bg-gray-700/50 hover:bg-gray-600/70 text-gray-300'}`}
+            title="尘埃云">
+            <CircleOff size={14} />
+          </button>
         </div>
+      </div>
 
-        <div className="w-px h-6 bg-gray-700 mx-1" />
-
-        <button
-          onClick={() => setExpanded(!expanded)}
-          className={`p-2 rounded-lg transition-colors text-white ${expanded ? 'bg-blue-600/30 text-blue-300' : 'hover:bg-gray-700'}`}
-          title="缩放设置"
-        >
-          <Settings2 size={18} />
-        </button>
-
-        <button
-          onClick={() => setVisualExpanded(!visualExpanded)}
-          className={`p-2 rounded-lg transition-colors text-white ${visualExpanded ? 'bg-purple-600/30 text-purple-300' : 'hover:bg-gray-700'}`}
-          title="视觉效果"
-        >
-          <Palette size={18} />
-        </button>
+      <div className="bg-gray-900/70 backdrop-blur-sm border-t border-gray-700/30 px-3 py-1.5">
+        <div className="flex items-center gap-2 overflow-x-auto max-w-screen-xl mx-auto scrollbar-thin">
+          <span className="text-[10px] text-gray-500 shrink-0 mr-1">天体:</span>
+          {planets.map((planet) => (
+            <button
+              key={planet.id}
+              onClick={() => handlePlanetClick(planet)}
+              className={`
+                px-2.5 py-1 rounded-full text-xs whitespace-nowrap transition-all shrink-0
+                ${selectedBody?.id === planet.id
+                  ? 'bg-blue-600/80 text-white ring-1 ring-blue-400'
+                  : 'bg-gray-700/40 text-gray-300 hover:bg-gray-600/60'}
+              `}
+            >
+              {planet.name}
+            </button>
+          ))}
+          <button
+            onClick={() => { selectBody(null); setFocusBody(null) }}
+            className="px-2.5 py-1 rounded-full text-xs bg-gray-700/30 text-gray-400 hover:bg-gray-600/50 transition-all shrink-0">
+            全景
+          </button>
+        </div>
       </div>
     </div>
   )
 }
-
-export default ControlPanel

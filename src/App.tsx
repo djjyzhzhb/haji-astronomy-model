@@ -10,19 +10,17 @@ import { useStore } from './store'
 import { parseHash } from './utils/router'
 import * as THREE from 'three'
 
-// 移动端竖屏检测：宽 < 900px 且竖屏时旋转为横屏
+// ─── 移动端竖屏检测（原生视口，不使用 CSS 旋转） ───
 function useMobilePortrait() {
   const [isPortrait, setIsPortrait] = useState(false)
 
   useEffect(() => {
     const check = () => {
-      const w = window.innerWidth
-      const h = window.innerHeight
-      setIsPortrait(w < 900 && h > w)
+      setIsPortrait(window.innerWidth < 900 && window.innerHeight > window.innerWidth)
     }
     check()
     window.addEventListener('resize', check)
-    window.addEventListener('orientationchange', check)
+    window.addEventListener('orientationchange', () => setTimeout(check, 100))
     return () => {
       window.removeEventListener('resize', check)
       window.removeEventListener('orientationchange', check)
@@ -113,14 +111,6 @@ function App() {
   const isMobilePortrait = useMobilePortrait()
 
   useEffect(() => {
-    // 根据竖屏状态切换 root 的 CSS 类
-    const root = document.getElementById('root')
-    if (root) {
-      root.classList.toggle('mobile-portrait', isMobilePortrait)
-    }
-  }, [isMobilePortrait])
-
-  useEffect(() => {
     const route = parseHash()
     if (route.page === 'detail') {
       navigateToDetail(route.planetId)
@@ -132,32 +122,44 @@ function App() {
   }
 
   return (
-    <div className="w-full h-full relative" style={{ backgroundColor }}>
-      <Canvas
-        key={distanceScale}
-        camera={{ position: cameraPosition as [number, number, number], fov: 60 }}
-        gl={{
-          antialias: true,
-          powerPreference: "high-performance",
-        }}
-        shadows
-      >
-        <Suspense fallback={null}>
-          <SceneWrapper />
-        </Suspense>
-      </Canvas>
+    <div className="w-full h-full relative flex flex-col" style={{ backgroundColor }}>
+      {/* Canvas 区域：横屏占满，竖屏占 60vh */}
+      <div className={`relative ${isMobilePortrait ? 'mobile-canvas-area' : 'flex-1'}`}>
+        <Canvas
+          key={distanceScale}
+          camera={{ position: cameraPosition as [number, number, number], fov: 60 }}
+          gl={{
+            antialias: true,
+            powerPreference: "high-performance",
+          }}
+          shadows
+        >
+          <Suspense fallback={null}>
+            <SceneWrapper />
+          </Suspense>
+        </Canvas>
+      </div>
       
-      <ControlPanel />
-      <div className="absolute top-4 right-4 z-20">
+      {/* 控制面板：竖屏时底部堆叠 */}
+      <ControlPanel isMobilePortrait={isMobilePortrait} />
+      
+      {/* 性能监控（始终右上角） */}
+      <div className="absolute top-2 right-2 z-20 max-md:top-1 max-md:right-1">
         <PerformanceMonitor />
       </div>
 
+      {/* 天体信息面板 */}
       {selectedBody && (
-        <div className="absolute top-4 left-4 z-10 max-md:fixed max-md:top-14 max-md:left-1/2 max-md:-translate-x-1/2 max-md:z-50 max-md:w-[92vw]">
+        <div className={`
+          absolute z-10
+          max-md:fixed max-md:bottom-[18vh] max-md:left-1/2 max-md:-translate-x-1/2 max-md:z-50 max-md:w-[90vw]
+          ${isMobilePortrait ? 'max-md:top-auto' : 'top-4 left-4'}
+        `}>
           <InfoPanel />
         </div>
       )}
 
+      {/* 标题（仅桌面端显示） */}
       <div className="absolute top-4 right-4 max-md:hidden text-white pointer-events-none">
         <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
           天文模型

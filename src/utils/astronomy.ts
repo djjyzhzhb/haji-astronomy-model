@@ -257,7 +257,7 @@ export function horizontalToWorldDir(
  * @param planetRotationAngle 行星自转角（弧度，从 epoch 开始累积）
  * @param planetAxialTilt    行星轴倾角（弧度）
  * @param planetRadius       行星半径（任意单位，仅用于方向计算，可使用 1.0）
- * @returns { up: THREE.Vector3, east: THREE.Vector3, north: THREE.Vector3 } 均已归一化
+ * @returns { up: THREE.Vector3, east: THREE.Vector3, north: THREE.Vector3, position: THREE.Vector3 } 均已归一化，position 为观测者位置（未归一化）
  */
 export function buildENUBasis(
   latitude: number,
@@ -265,7 +265,7 @@ export function buildENUBasis(
   planetRotationAngle: number,
   planetAxialTilt: number,
   planetRadius: number = 1.0,
-): { up: THREE.Vector3; east: THREE.Vector3; north: THREE.Vector3 } {
+): { up: THREE.Vector3; east: THREE.Vector3; north: THREE.Vector3; position: THREE.Vector3 } {
   // 1. 观测点在行星局部坐标（Y=自转轴，X-Z=赤道面，lon=0 对应 +Z）
   const cosLat = Math.cos(latitude);
   const sinLat = Math.sin(latitude);
@@ -290,6 +290,9 @@ export function buildENUBasis(
   const worldY = rotY * cosTilt - rotZ * sinTilt;
   const worldZ = rotY * sinTilt + rotZ * cosTilt;
 
+  // 观测者在行星本地坐标系中的位置（表面法线方向 × 半径）
+  const position = new THREE.Vector3(worldX, worldY, worldZ);
+
   // 4. 天顶方向 = 表面法线
   const up = new THREE.Vector3(worldX, worldY, worldZ).normalize();
 
@@ -307,5 +310,92 @@ export function buildENUBasis(
   // 7. 北方向 = 天顶 × 东（右手系）
   const north = new THREE.Vector3().crossVectors(up, east).normalize();
 
-  return { up, east, north };
+  return { up, east, north, position };
+}
+
+/**
+ * 将 ENU 局部坐标系旋转到视觉场景坐标系。
+ * 视觉场景约定：天顶=+Y，东=+X，北=+Z。
+ * ENU 约定（基准态）：天顶=+Z，东=+X，北=+Y。
+ * 
+ * 变换：绕 X 轴旋转 -π/2（即 ENU up(+Z) → 视觉 up(+Y)，ENU north(+Y) → 视觉 north(+Z)）
+ * 
+ * @param enuUp     ENU 天顶向量（已归一化）
+ * @param enuEast   ENU 东向量（已归一化）
+ * @param enuNorth  ENU 北向量（已归一化）
+ * @returns { up: THREE.Vector3, east: THREE.Vector3, north: THREE.Vector3 } 视觉场景基向量（均已归一化）
+ */
+export function enuToVisualBasis(
+  enuUp: THREE.Vector3,
+  enuEast: THREE.Vector3,
+  enuNorth: THREE.Vector3,
+): { up: THREE.Vector3; east: THREE.Vector3; north: THREE.Vector3 } {
+  // 绕 X 轴旋转 -π/2 的矩阵
+  // rotateX(-π/2): Y' = Z, Z' = -Y, X' = X
+  const cosA = Math.cos(-Math.PI / 2);  // ≈ 0
+  const sinA = Math.sin(-Math.PI / 2);  // ≈ -1
+
+  const rotateY = (y: number, z: number) => y * cosA - z * sinA;  // = z (since cosA≈0, sinA≈-1 → 0*y - (-1)*z = z)
+  const rotateZ = (y: number, z: number) => y * sinA + z * cosA;  // = -y (since sinA≈-1, cosA≈0 → (-1)*y + 0*z = -y)
+
+  const visualUp = new THREE.Vector3(
+    enuUp.x,
+    rotateY(enuUp.y, enuUp.z),
+    rotateZ(enuUp.y, enuUp.z),
+  ).normalize();
+
+  const visualEast = new THREE.Vector3(
+    enuEast.x,
+    rotateY(enuEast.y, enuEast.z),
+    rotateZ(enuEast.y, enuEast.z),
+  ).normalize();
+
+  let visualNorth = new THREE.Vector3(
+    enuNorth.x,
+    rotateY(enuNorth.y, enuNorth.z),
+    rotateZ(enuNorth.y, enuNorth.z),
+  ).normalize();
+
+  // 处理 east 退化情况
+  if (visualEast.length() < 0.001) {
+    // east 退化时重新计算：用 (1,0,0) 投影到切平面
+    visualEast.set(1, 0, 0);
+    const dotUp = visualEast.dot(visualUp);
+    visualEast.sub(visualUp.clone().multiplyScalar(dotUp)).normalize();
+    // 重新计算 north
+    visualNorth.crossVectors(visualUp, visualEast).normalize();
+  }
+
+  return { up: visualUp, east: visualEast, north: visualNorth };
+}
+
+/**
+ * 将地平坐标转为视觉场景世界空间方向向量。
+ * 与 horizontalToWorldDir 逻辑相同，但使用视觉场景基向量。
+ * 
+ * @param h     高度角（弧度）
+ * @param A     方位角（弧度），A=0 对应北，A=π/2 对应东
+ * @param visualUp    视觉场景天顶方向
+ * @param visualEast  视觉场景东方向
+ * @param visualNorth 视觉场景北方向
+ * @returns 归一化的视觉场景世界方向向量
+ */
+export function visualHorizontalToWorldDir(
+  h: number,
+  A: number,
+  visualUp: THREE.Vector3,
+  visualEast: THREE.Vector3,
+  visualNorth: THREE.Vector3,
+): THREE.Vector3 {
+  const cosH = Math.cos(h);
+  const sinH = Math.sin(h);
+  const cosA = Math.cos(A);
+  const sinA = Math.sin(A);
+
+  const dir = new THREE.Vector3()
+    .addScaledVector(visualNorth, -cosH * cosA)
+    .addScaledVector(visualEast, cosH * sinA)
+    .addScaledVector(visualUp, sinH);
+
+  return dir.normalize();
 }

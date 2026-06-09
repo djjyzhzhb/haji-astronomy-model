@@ -17,7 +17,7 @@ import { QualityLevel, ViewPreset } from '../types'
 import { calculateDate } from '../utils/calendar'
 import { calculateSunSkyPosition } from '../utils/surfaceCoords'
 import { sunEclipticHigh, eclipticToEquatorial } from '../utils/astronomy'
-import { D_YEAR } from '../config/constants'
+import { D_YEAR, SECONDS_PER_DAY } from '../config/constants'
 
 // 质量设置配置
 const qualitySettings = {
@@ -189,9 +189,12 @@ const cloudFragmentShader = `
 // 行星环着色器 —— 用碎片在环面上的方位计算光照，解决平面法线单一问题
 const ringVertexShader = `
   varying vec3 vWorldPos;
+  varying vec3 vWorldNormal;
   void main() {
     vec4 worldPos = modelMatrix * vec4(position, 1.0);
     vWorldPos = worldPos.xyz;
+    // 环的局部法向量：ringGeometry 在 XY 平面，经 π/2 绕 X 旋转后法向量指向 Y
+    vWorldNormal = normalize(mat3(modelMatrix) * vec3(0.0, 1.0, 0.0));
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
 `
@@ -202,13 +205,24 @@ const ringFragmentShader = `
   uniform float opacity;
   uniform float emissiveStrength;
   varying vec3 vWorldPos;
+  varying vec3 vWorldNormal;
   void main() {
-    vec3 ringDir = normalize(vec3(vWorldPos.x, 0.0, vWorldPos.z));
-    vec3 sunXZ   = normalize(vec3(sunDirection.x, 0.0, sunDirection.z));
-    float sunDot = dot(ringDir, sunXZ);
-    float lightFactor = smoothstep(-0.6, 0.6, sunDot);
-    float brightness = mix(0.12, 1.0, lightFactor);
-    vec3 finalRGB = ringColor * (brightness + emissiveStrength);
+    vec3 N = normalize(vWorldNormal);
+    vec3 L = normalize(sunDirection);
+    vec3 ringDir = normalize(vWorldPos);
+
+    // 环平面倾角光照：环面法向量与太阳方向的夹角决定整体亮度
+    float tiltLight = abs(dot(N, L));
+
+    // 相位光照：环上迎太阳侧亮、背太阳侧暗（沿环面的方位角梯度）
+    float phaseDot = dot(ringDir, L);
+    float phaseLight = smoothstep(-0.6, 0.6, phaseDot);
+
+    // 组合：倾角调制基础范围，相位产生明暗梯度
+    float diffuse = tiltLight * mix(0.10, 1.0, phaseLight);
+    // 叠加自发光基底（稀薄环的微弱散射光）
+    float brightness = diffuse + emissiveStrength;
+    vec3 finalRGB = ringColor * brightness;
     gl_FragColor = vec4(finalRGB, opacity);
   }
 `
@@ -655,9 +669,17 @@ function PlanetMesh({ customTexture }: { customTexture?: THREE.Texture | null })
 }
 
 function DetailScene({ viewPreset, customTexture }: { viewPreset: ViewPreset; customTexture?: THREE.Texture | null }) {
-  const { detailPageState, timeSystem } = useStore()
+  const { detailPageState, timeSystem, updateTimeSystem } = useStore()
   const orbitControlsRef = useRef<any>(null)
   const { camera } = useThree()
+  
+  // 时间自动推进
+  useFrame((_state, delta) => {
+    if (!timeSystem.isPaused) {
+      const dtDays = (delta * timeSystem.timeScale) / SECONDS_PER_DAY
+      updateTimeSystem({ T: timeSystem.T + dtDays })
+    }
+  })
   
   // 视角预设切换
   useEffect(() => {
@@ -683,12 +705,18 @@ function DetailScene({ viewPreset, customTexture }: { viewPreset: ViewPreset; cu
     }
   }, [viewPreset, camera])
   
-  // 计算太阳方向（从 T 派生 dayTime）
+  // 计算太阳方向（使用天文模型，与 PlanetMesh shader 的 sunRef.current 一致）
+  const axialTilt = detailPageState.axialTilt
   const sunDirection = useMemo(() => {
-    const dayTime = timeSystem.T % 1
-    const angle = dayTime * Math.PI * 2
-    return new THREE.Vector3(Math.sin(angle) * 10, 0, Math.cos(angle) * 10)
-  }, [timeSystem.T])
+    const [sunLon, epsPrime] = sunEclipticHigh(timeSystem.T)
+    const [sunRA, sunDec] = eclipticToEquatorial(sunLon, 0, epsPrime)
+    const cosDec = Math.cos(sunDec)
+    return new THREE.Vector3(
+      cosDec * Math.sin(sunRA),
+      Math.sin(sunDec),
+      cosDec * Math.cos(sunRA)
+    ).applyMatrix4(new THREE.Matrix4().makeRotationX(axialTilt)).normalize().multiplyScalar(10)
+  }, [timeSystem.T, axialTilt])
   
   return (
     <>

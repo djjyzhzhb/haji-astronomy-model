@@ -3,8 +3,8 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Billboard, Html } from '@react-three/drei'
 import * as THREE from 'three'
 import { CelestialBody } from '../types'
-import { altAzToDirection, applyAtmosphericRefraction, worldToSkyPosition } from '../utils/surfaceCoords'
-import { sunEclipticHigh, eclipticToEquatorial, equatorialToHorizontal, calcLST, horizontalToWorldDir, buildENUBasis } from '../utils/astronomy'
+import { applyAtmosphericRefraction, worldToSkyPosition } from '../utils/surfaceCoords'
+import { sunEclipticHigh, eclipticToEquatorial, equatorialToHorizontal, calcLST, buildENUBasis } from '../utils/astronomy'
 import { useStore } from '../store'
 import { SECONDS_PER_DAY, D_YEAR } from '../config/constants'
 import { calculateOrbitalPositionScaled } from '../utils/keplerOrbit'
@@ -35,13 +35,150 @@ export interface SurfaceViewHandle {
   setYawPitch: (yaw: number, pitch: number) => void
 }
 
+// 天体运行轨迹预测（局部坐标版）- 在 Group 内使用局部 ENU 坐标
+function CelestialTrajectoryLocal({ celestialBodies, observerPlanet, globalTime, observerPlanetWorldPos, latitude, longitude, enuBasis }: { 
+  celestialBodies: CelestialBody[], 
+  observerPlanet: CelestialBody,
+  globalTime: number,
+  observerPlanetWorldPos: THREE.Vector3,
+  latitude: number,
+  longitude: number,
+  enuBasis: { up: THREE.Vector3; east: THREE.Vector3; north: THREE.Vector3; position: THREE.Vector3 }
+}) {
+  const trajectories = useMemo(() => {
+    const result: { body: CelestialBody; points: THREE.Vector3[]; opacity: number }[] = []
+    
+    const basePeriod = D_YEAR / Math.pow(observerPlanet.orbitalElements!.semiMajorAxis, 1.5)
+    const observerAxialTilt = observerPlanet.axialTilt || 0.33
+    
+    // 局部坐标转换辅助函数
+    const horizontalToLocal = (h: number, A: number) => {
+      const cosH = Math.cos(h)
+      const sinH = Math.sin(h)
+      const cosA = Math.cos(A)
+      const sinA = Math.sin(A)
+      return new THREE.Vector3(cosH * sinA, sinH, cosH * cosA)
+    }
+    
+    celestialBodies.forEach(body => {
+      // 跳过观测者自身
+      if (body.id === observerPlanet.id) return
+      
+      const points: THREE.Vector3[] = []
+      const numPoints = 80
+      let trajectoryOpacity = 0.3
+      
+      if (body.type === 'star') {
+        for (let i = 0; i <= numPoints; i++) {
+          const t = i / numPoints
+          const time = globalTime + t * D_YEAR
+          const planetPos = calculateOrbitalPositionScaled(time, observerPlanet.orbitalElements!, 1, basePeriod)
+          const planetWorldPos = new THREE.Vector3(planetPos.x, planetPos.y, planetPos.z)
+          const sunWorldPos = new THREE.Vector3(0, 0, 0)
+          const planetRotationAngle = time * (2 * Math.PI)
+          
+          const altAz = worldToSkyPosition(
+            sunWorldPos, planetWorldPos,
+            observerAxialTilt, planetRotationAngle,
+            latitude, longitude, observerPlanet.radius
+          )
+          
+          if (altAz.altitude < -0.1) continue
+          const dir = horizontalToLocal(altAz.altitude, altAz.azimuth)
+          points.push(dir.clone().multiplyScalar(750))
+        }
+        trajectoryOpacity = 0.35
+        
+      } else if (body.parentId && body.type === 'moon') {
+        const orbitalPeriodDays = body.orbitalPeriodDays || 30
+        const moonBasePeriod = orbitalPeriodDays / Math.pow(body.orbitalElements!.semiMajorAxis, 1.5)
+        
+        for (let i = 0; i <= numPoints; i++) {
+          const t = i / numPoints
+          const time = globalTime + t * orbitalPeriodDays
+          const satellitePos = calculateOrbitalPositionScaled(time, body.orbitalElements!, 1, moonBasePeriod)
+          const worldPos = new THREE.Vector3(satellitePos.x, satellitePos.y, satellitePos.z).add(observerPlanetWorldPos)
+          const planetRotationAngle = time * (2 * Math.PI)
+          
+          const altAz = worldToSkyPosition(
+            worldPos, observerPlanetWorldPos,
+            observerAxialTilt, planetRotationAngle,
+            latitude, longitude, observerPlanet.radius
+          )
+          
+          if (altAz.altitude < -0.1) continue
+          const dir = horizontalToLocal(altAz.altitude, altAz.azimuth)
+          points.push(dir.clone().multiplyScalar(750))
+        }
+        trajectoryOpacity = 0.25
+        
+      } else if (body.type === 'planet' && body.orbitalElements) {
+        const outerBasePeriod = D_YEAR / Math.pow(body.orbitalElements.semiMajorAxis, 1.5)
+        
+        for (let i = 0; i <= numPoints; i++) {
+          const t = i / numPoints
+          const time = globalTime + t * D_YEAR
+          
+          const observerPos = calculateOrbitalPositionScaled(time, observerPlanet.orbitalElements!, 1, basePeriod)
+          const observerWorldPos = new THREE.Vector3(observerPos.x, observerPos.y, observerPos.z)
+          
+          const outerPos = calculateOrbitalPositionScaled(time, body.orbitalElements!, 1, outerBasePeriod)
+          const outerWorldPos = new THREE.Vector3(outerPos.x, outerPos.y, outerPos.z)
+          
+          const planetRotationAngle = time * (2 * Math.PI)
+          
+          const altAz = worldToSkyPosition(
+            outerWorldPos, observerWorldPos,
+            observerAxialTilt, planetRotationAngle,
+            latitude, longitude, observerPlanet.radius
+          )
+          
+          if (altAz.altitude < -0.1) continue
+          const dir = horizontalToLocal(altAz.altitude, altAz.azimuth)
+          points.push(dir.clone().multiplyScalar(750))
+        }
+        trajectoryOpacity = 0.2
+      }
+      
+      if (points.length > 1) {
+        result.push({ body, points, opacity: trajectoryOpacity })
+      }
+    })
+    
+    return result
+  }, [celestialBodies, observerPlanet, globalTime, observerPlanetWorldPos, latitude, longitude])
+
+  return (
+    <group>
+      {trajectories.map((traj, idx) => (
+        <line key={traj.body.id}>
+          <bufferGeometry>
+            <bufferAttribute
+              attach="attributes-position"
+              count={traj.points.length}
+              array={new Float32Array(traj.points.flatMap(p => [p.x, p.y, p.z]))}
+              itemSize={3}
+            />
+          </bufferGeometry>
+          <lineBasicMaterial
+            color={traj.body.color}
+            transparent
+            opacity={traj.opacity}
+            linewidth={1}
+          />
+        </line>
+      ))}
+    </group>
+  )
+}
+
 // 天空穹顶着色器
 const skyDomeVertexShader = `
+  varying vec3 vLocalPos;
   varying vec3 vWorldPosition;
-  varying vec3 vNormal;
 
   void main() {
-    vNormal = normalize(normal);
+    vLocalPos = position;
     vec4 worldPos = modelMatrix * vec4(position, 1.0);
     vWorldPosition = worldPos.xyz;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
@@ -52,21 +189,23 @@ const skyDomeFragmentShader = `
   uniform vec3 sunDirection;
   uniform float sunAltitude;
   uniform vec3 atmosphereColor;
+  uniform vec3 enuUp;
 
+  varying vec3 vLocalPos;
   varying vec3 vWorldPosition;
-  varying vec3 vNormal;
 
   void main() {
-    vec3 viewDir = normalize(vWorldPosition - cameraPosition);
-
-    // 天顶方向 (Y轴向上)
-    float zenithDot = max(viewDir.y, 0.0);
+    // 使用局部ENU坐标（SkyDome顶点在局部空间即方向向量）
+    vec3 localDir = normalize(vLocalPos);
+    
+    // 天顶方向：点乘 enuUp = 真实天顶分量
+    float zenithDot = max(dot(localDir, normalize(enuUp)), 0.0);
 
     // 地平线附近
     float horizonFactor = 1.0 - zenithDot;
 
-    // 太阳方向
-    float sunDot = max(dot(viewDir, normalize(sunDirection)), 0.0);
+    // 太阳方向（局部 ENU 坐标）
+    float sunDot = max(dot(localDir, normalize(sunDirection)), 0.0);
 
     // 三段式昼夜过渡阈值 (6° = 0.1047 rad)
     float dayThreshold = 0.105;
@@ -121,8 +260,11 @@ const skyDomeFragmentShader = `
 
 // 地面着色器 - 昼夜阴影
 const groundVertexShader = `
+  varying vec3 vLocalPos;
   varying vec3 vWorldPosition;
+
   void main() {
+    vLocalPos = position;
     vec4 worldPos = modelMatrix * vec4(position, 1.0);
     vWorldPosition = worldPos.xyz;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
@@ -133,18 +275,19 @@ const groundFragmentShader = `
   uniform vec3 sunDirection;
   uniform float sunAltitude;
   uniform vec3 groundColor;
+  varying vec3 vLocalPos;
   varying vec3 vWorldPosition;
 
   void main() {
     vec3 baseGroundColor = groundColor;
 
-    // 太阳在水平面上的投影方向（处理天顶退化情况）
+    // 太阳在水平面上的投影（局部坐标 XZ 平面 = 切平面）
     vec2 sunHoriz = vec2(sunDirection.x, sunDirection.z);
     float sunHorizLen = length(sunHoriz);
     vec2 sunDir2D = sunHorizLen < 0.001 ? vec2(1.0, 0.0) : sunHoriz / sunHorizLen;
     
-    // 当前像素相对于地面中心的方向
-    vec2 posDir2D = normalize(vec2(vWorldPosition.x, vWorldPosition.z));
+    // 当前像素在切平面上的方向（局部坐标 XZ）
+    vec2 posDir2D = normalize(vec2(vLocalPos.x, vLocalPos.z));
     
     // 朝向太阳的程度：1 = 正对太阳方向，-1 = 背对太阳
     float facingSun = dot(posDir2D, sunDir2D);
@@ -326,6 +469,49 @@ function EclipticLine({ lineWidth, axialTilt, sunDirection }: { lineWidth: numbe
   )
 }
 
+// 黄道线（局部坐标版）- 在 Group 内使用局部 ENU 坐标计算
+function EclipticLineLocal({ lineWidth, axialTilt, sunDirLocal, enuBasis }: {
+  lineWidth: number; axialTilt: number; sunDirLocal: THREE.Vector3; enuBasis: { east: THREE.Vector3; up: THREE.Vector3; north: THREE.Vector3 }
+}) {
+  const points = useMemo(() => {
+    const count = 100
+    const positions = []
+    
+    // 轨道面法线在行星本地世界空间 = (0, cosTilt, sinTilt)
+    // 需要投影到 ENU 局部坐标基 (east, up, north)
+    const orbitNormalWorld = new THREE.Vector3(0, Math.cos(axialTilt), Math.sin(axialTilt))
+    const orbitNormalLocal = new THREE.Vector3(
+      orbitNormalWorld.dot(enuBasis.east),
+      orbitNormalWorld.dot(enuBasis.up),
+      orbitNormalWorld.dot(enuBasis.north)
+    ).normalize()
+    
+    for (let i = 0; i <= count; i++) {
+      const angle = (i / count) * Math.PI * 2
+      const point = sunDirLocal.clone()
+        .applyAxisAngle(orbitNormalLocal, angle)
+        .multiplyScalar(800)
+      positions.push(point)
+    }
+    
+    return positions
+  }, [axialTilt, sunDirLocal])
+
+  return (
+    <line>
+      <bufferGeometry>
+        <bufferAttribute
+          attach="attributes-position"
+          count={points.length}
+          array={new Float32Array(points.flatMap(p => [p.x, p.y, p.z]))}
+          itemSize={3}
+        />
+      </bufferGeometry>
+      <lineBasicMaterial color="#ffcc00" linewidth={lineWidth} transparent opacity={0.8} />
+    </line>
+  )
+}
+
 // 地平线
 function HorizonCircle() {
   const points = useMemo(() => {
@@ -363,206 +549,78 @@ function HorizonCircle() {
   )
 }
 
-// 方向标识（东、西、南、北）- 基于 ENU 局部坐标系
-function DirectionMarkers({ north, east }: { north: THREE.Vector3, east: THREE.Vector3 }) {
+// 方向标识（东、西、南、北）- 在局部 ENU 坐标中，带 Html 标签
+function DirectionMarkers() {
   const markerRadius = 700
-  
+  const labelOffset = 60     // 标签在几何体上方的偏移量
+  const markerOpacity = 0.9
+
+  // 局部 ENU 坐标：X=东, Y=天顶, Z=北
   const directions = useMemo(() => [
-    { pos: north.clone().multiplyScalar(markerRadius), color: '#ff6b6b', type: 'cone' },      // 北 - 锥形
-    { pos: east.clone().multiplyScalar(markerRadius), color: '#4ecdc4', type: 'box' },        // 东 - 盒子
-    { pos: north.clone().multiplyScalar(-markerRadius), color: '#45b7d1', type: 'ring' },     // 南 - 圆环
-    { pos: east.clone().multiplyScalar(-markerRadius), color: '#96ceb4', type: 'sphere' },    // 西 - 球体
-  ], [north, east])
+    { pos: new THREE.Vector3(0, 0, +markerRadius), color: '#ff4444', name: '北 (North)', geoType: 'cone', rotate: [Math.PI / 2, 0, 0] },
+    { pos: new THREE.Vector3(+markerRadius, 0, 0),  color: '#44dd44', name: '东 (East)',  geoType: 'box', rotate: [0, 0, 0] },
+    { pos: new THREE.Vector3(0, 0, -markerRadius), color: '#4488ff', name: '南 (South)', geoType: 'ring', rotate: [Math.PI / 2, 0, 0] },
+    { pos: new THREE.Vector3(-markerRadius, 0, 0),  color: '#dddd44', name: '西 (West)',  geoType: 'sphere', rotate: [0, 0, 0] },
+  ], [])
 
   return (
     <group>
       {directions.map((dir, index) => (
-        <group key={index} position={[dir.pos.x, dir.pos.y + 50, dir.pos.z]}>
-          {dir.type === 'cone' && (
-            <mesh rotation={[Math.PI / 2, 0, 0]}>
-              <coneGeometry args={[20, 50, 16]} />
-              <meshBasicMaterial color={dir.color} transparent opacity={0.8} />
-            </mesh>
-          )}
-          {dir.type === 'box' && (
-            <mesh>
-              <boxGeometry args={[30, 30, 30]} />
-              <meshBasicMaterial color={dir.color} transparent opacity={0.8} />
-            </mesh>
-          )}
-          {dir.type === 'ring' && (
-            <mesh rotation={[Math.PI / 2, 0, 0]}>
-              <torusGeometry args={[20, 5, 16, 32]} />
-              <meshBasicMaterial color={dir.color} transparent opacity={0.8} />
-            </mesh>
-          )}
-          {dir.type === 'sphere' && (
-            <mesh>
-              <sphereGeometry args={[20, 16, 16]} />
-              <meshBasicMaterial color={dir.color} transparent opacity={0.8} />
-            </mesh>
-          )}
+        <group key={index} position={[dir.pos.x, dir.pos.y, dir.pos.z]}>
+          {/* 几何体标记 */}
+          <mesh rotation={dir.rotate as [number, number, number]}>
+            {dir.geoType === 'cone' && <coneGeometry args={[18, 45, 16]} />}
+            {dir.geoType === 'box' && <boxGeometry args={[28, 28, 28]} />}
+            {dir.geoType === 'ring' && <torusGeometry args={[18, 5, 16, 32]} />}
+            {dir.geoType === 'sphere' && <sphereGeometry args={[18, 16, 16]} />}
+            <meshBasicMaterial color={dir.color} transparent opacity={markerOpacity} />
+          </mesh>
+          {/* Html 文字标签：置于几何体上方 */}
+          <Html position={[0, labelOffset, 0]} center style={{ pointerEvents: 'none' }}>
+            <div style={{
+              color: dir.color,
+              fontSize: 14,
+              fontWeight: 'bold',
+              textShadow: '0 0 8px rgba(0,0,0,0.8), 0 1px 2px rgba(0,0,0,0.9)',
+              whiteSpace: 'nowrap',
+              userSelect: 'none',
+            }}>
+              {dir.name}
+            </div>
+          </Html>
         </group>
       ))}
     </group>
   )
 }
 
-// 天体运行轨迹预测
-function CelestialTrajectory({ celestialBodies, observerPlanet, globalTime, observerPlanetWorldPos, latitude, longitude }: { 
-  celestialBodies: CelestialBody[], 
-  observerPlanet: CelestialBody,
-  globalTime: number,
-  observerPlanetWorldPos: THREE.Vector3,
-  latitude: number,
-  longitude: number
-}) {
-  const trajectories = useMemo(() => {
-    const result: { body: CelestialBody; points: THREE.Vector3[]; opacity: number }[] = []
-    
-    const basePeriod = D_YEAR / Math.pow(observerPlanet.orbitalElements!.semiMajorAxis, 1.5)
-    const observerAxialTilt = observerPlanet.axialTilt || 0.33
-    
-    celestialBodies.forEach(body => {
-      // 跳过观测者自身
-      if (body.id === observerPlanet.id) return
-      
-      const points: THREE.Vector3[] = []
-      const numPoints = 80
-      let trajectoryOpacity = 0.3
-      
-      if (body.type === 'star') {
-        // === 太阳轨迹：采样一整年（time 以本地日为单位）===
-        for (let i = 0; i <= numPoints; i++) {
-          const t = i / numPoints
-          const time = globalTime + t * D_YEAR
-          const planetPos = calculateOrbitalPositionScaled(time, observerPlanet.orbitalElements!, 1, basePeriod)
-          const planetWorldPos = new THREE.Vector3(planetPos.x, planetPos.y, planetPos.z)
-          const sunWorldPos = new THREE.Vector3(0, 0, 0)
-          const planetRotationAngle = time * (2 * Math.PI)
-          
-          const altAz = worldToSkyPosition(
-            sunWorldPos, planetWorldPos,
-            observerAxialTilt, planetRotationAngle,
-            latitude, longitude, observerPlanet.radius
-          )
-          
-          if (altAz.altitude < -0.1) continue
-          const dir = altAzToDirection(altAz.altitude, altAz.azimuth)
-          points.push(dir.clone().multiplyScalar(750))
-        }
-        trajectoryOpacity = 0.35
-        
-      } else if (body.parentId && body.type === 'moon') {
-        // === 卫星轨迹：采样一个完整轨道周期（time 以本地日为单位）===
-        const orbitalPeriodDays = body.orbitalPeriodDays || 30
-        const moonBasePeriod = orbitalPeriodDays / Math.pow(body.orbitalElements!.semiMajorAxis, 1.5)
-        
-        for (let i = 0; i <= numPoints; i++) {
-          const t = i / numPoints
-          const time = globalTime + t * orbitalPeriodDays
-          const satellitePos = calculateOrbitalPositionScaled(time, body.orbitalElements!, 1, moonBasePeriod)
-          const worldPos = new THREE.Vector3(satellitePos.x, satellitePos.y, satellitePos.z).add(observerPlanetWorldPos)
-          const planetRotationAngle = time * (2 * Math.PI)
-          
-          const altAz = worldToSkyPosition(
-            worldPos, observerPlanetWorldPos,
-            observerAxialTilt, planetRotationAngle,
-            latitude, longitude, observerPlanet.radius
-          )
-          
-          if (altAz.altitude < -0.1) continue
-          const dir = altAzToDirection(altAz.altitude, altAz.azimuth)
-          points.push(dir.clone().multiplyScalar(750))
-        }
-        trajectoryOpacity = 0.25
-        
-      } else if (body.type === 'planet' && body.orbitalElements) {
-        // === 外行星轨迹：采样一整年，展示在天球上的视运动路径（time 以本地日为单位）===
-        const outerBasePeriod = D_YEAR / Math.pow(body.orbitalElements.semiMajorAxis, 1.5)
-        
-        for (let i = 0; i <= numPoints; i++) {
-          const t = i / numPoints
-          const time = globalTime + t * D_YEAR
-          
-          // 观测者行星位置
-          const observerPos = calculateOrbitalPositionScaled(time, observerPlanet.orbitalElements!, 1, basePeriod)
-          const observerWorldPos = new THREE.Vector3(observerPos.x, observerPos.y, observerPos.z)
-          
-          // 外行星位置
-          const outerPos = calculateOrbitalPositionScaled(time, body.orbitalElements!, 1, outerBasePeriod)
-          const outerWorldPos = new THREE.Vector3(outerPos.x, outerPos.y, outerPos.z)
-          
-          const planetRotationAngle = time * (2 * Math.PI)
-          
-          const altAz = worldToSkyPosition(
-            outerWorldPos, observerWorldPos,
-            observerAxialTilt, planetRotationAngle,
-            latitude, longitude, observerPlanet.radius
-          )
-          
-          if (altAz.altitude < -0.1) continue
-          const dir = altAzToDirection(altAz.altitude, altAz.azimuth)
-          points.push(dir.clone().multiplyScalar(750))
-        }
-        trajectoryOpacity = 0.2
-      }
-      
-      if (points.length > 1) {
-        result.push({ body, points, opacity: trajectoryOpacity })
-      }
-    })
-    
-    return result
-  }, [celestialBodies, observerPlanet, globalTime, observerPlanetWorldPos, latitude, longitude])
-
-  return (
-    <group>
-      {trajectories.map((traj, idx) => (
-        <line key={traj.body.id}>
-          <bufferGeometry>
-            <bufferAttribute
-              attach="attributes-position"
-              count={traj.points.length}
-              array={new Float32Array(traj.points.flatMap(p => [p.x, p.y, p.z]))}
-              itemSize={3}
-            />
-          </bufferGeometry>
-          <lineBasicMaterial
-            color={traj.body.color}
-            transparent
-            opacity={traj.opacity}
-            linewidth={1}
-          />
-        </line>
-      ))}
-    </group>
-  )
-}
-
 // 天空穹顶
-function SkyDome({ sunDirection, sunAltitude, atmosphereColor }: {
+function SkyDome({ sunDirection, sunAltitude, atmosphereColor, observerPos, enuUp }: {
   sunDirection: THREE.Vector3
   sunAltitude: number
   atmosphereColor: string
+  observerPos: THREE.Vector3
+  enuUp: THREE.Vector3
 }) {
   const materialRef = useRef<THREE.ShaderMaterial>(null)
 
   const uniforms = useMemo(() => ({
     sunDirection: { value: new THREE.Vector3() },
     sunAltitude: { value: 0 },
-    atmosphereColor: { value: new THREE.Color(atmosphereColor) }
+    atmosphereColor: { value: new THREE.Color(atmosphereColor) },
+    enuUp: { value: new THREE.Vector3() }
   }), [])
 
   useFrame(() => {
     if (materialRef.current) {
       materialRef.current.uniforms.sunDirection.value.copy(sunDirection)
       materialRef.current.uniforms.sunAltitude.value = sunAltitude
+      materialRef.current.uniforms.enuUp.value.copy(enuUp)
     }
   })
 
   return (
-    <mesh>
+    <mesh position={observerPos}>
       <sphereGeometry args={[1000, 64, 64]} />
       <shaderMaterial
         ref={materialRef}
@@ -719,19 +777,21 @@ function Ground({ planet, sunDirection, sunAltitude, observerLat, observerLon }:
 }
 
 // 大气辉光
-function AtmosphereGlow({ sunDirection, show, atmosphereColor }: {
+function AtmosphereGlow({ sunDirection, show, atmosphereColor, observerPos, enuUp }: {
   sunDirection: THREE.Vector3
   show: boolean
   atmosphereColor: string
+  observerPos: THREE.Vector3
+  enuUp: THREE.Vector3
 }) {
   if (!show) return null
 
   const glowPosition = sunDirection.clone().multiplyScalar(100)
   const glowRotation = useMemo(() => {
     const quaternion = new THREE.Quaternion()
-    const target = glowPosition.clone()
-    const eye = new THREE.Vector3(0, 0, 0)
-    const up = new THREE.Vector3(0, 1, 0)
+    const target = glowPosition.clone().add(observerPos)
+    const eye = observerPos.clone()
+    const up = enuUp.clone()
     const matrix = new THREE.Matrix4().lookAt(eye, target, up)
     quaternion.setFromRotationMatrix(matrix)
     return new THREE.Euler().setFromQuaternion(quaternion)
@@ -767,8 +827,8 @@ function AtmosphereGlow({ sunDirection, show, atmosphereColor }: {
   )
 }
 
-// 天体标记
-function CelestialMarkers({
+// 天体标记（局部坐标版）- 在 Group 内使用局部 ENU 坐标
+function CelestialMarkersLocal({
   celestialBodies,
   observerPlanet,
   globalTime,
@@ -777,7 +837,8 @@ function CelestialMarkers({
   longitude,
   atmosphereRefraction,
   refractionCoefficient,
-  markerSizeScale
+  markerSizeScale,
+  enuBasis
 }: {
   celestialBodies: CelestialBody[]
   observerPlanet: CelestialBody
@@ -788,6 +849,7 @@ function CelestialMarkers({
   atmosphereRefraction: boolean
   refractionCoefficient: number
   markerSizeScale: number
+  enuBasis: { up: THREE.Vector3; east: THREE.Vector3; north: THREE.Vector3; position: THREE.Vector3 }
 }) {
   const markers = useMemo(() => {
     const result: {
@@ -804,6 +866,15 @@ function CelestialMarkers({
     const basePeriod = D_YEAR / Math.pow(observerPlanet.orbitalElements!.semiMajorAxis, 1.5)
     const planetRotationAngle = globalTime * (2 * Math.PI)
     const observerAxialTilt = observerPlanet.axialTilt || 0.33
+
+    // 局部坐标转换辅助函数
+    const horizontalToLocal = (h: number, A: number) => {
+      const cosH = Math.cos(h)
+      const sinH = Math.sin(h)
+      const cosA = Math.cos(A)
+      const sinA = Math.sin(A)
+      return new THREE.Vector3(cosH * sinA, sinH, cosH * cosA)
+    }
 
     // 太阳位置（用于计算相位角）
     const sunWorldPos = new THREE.Vector3(0, 0, 0)
@@ -847,7 +918,7 @@ function CelestialMarkers({
         ? applyAtmosphericRefraction(altitude, refractionCoefficient)
         : altitude
 
-      const skyDir = altAzToDirection(correctedAltitude, azimuth)
+      const skyDir = horizontalToLocal(correctedAltitude, azimuth)
       const skyPosition = skyDir.multiplyScalar(800)
 
       // === 计算距离相关的视觉属性 ===
@@ -859,36 +930,24 @@ function CelestialMarkers({
       let glowScale: number
       let displayColor: string
 
-      // === 统一视大小：apparentSize ∝ radius / distance ===
-      // K=80 校准点：大卫星 (radius=0.75, dist≈6.0) → 视觉大小 10
       const apparentSize = (body.radius / distanceToObserver) * 80
 
       if (body.parentId === observerPlanet.id) {
-        // 卫星：近距离，较大较亮
         baseSize = Math.max(2.5, Math.min(apparentSize, 14))
         opacity = 0.95
         glowOpacity = 0.4
         glowScale = 2.5
         displayColor = '#e8e8e8'
       } else {
-        // === 外行星：距离相关渲染 ===
         baseSize = Math.max(2.5, Math.min(apparentSize, 15))
         
-        // 计算相位角：太阳-观测者-行星 之间的角度
-        // cos(phaseAngle) = (sunDir · planetDir)，其中 sunDir = normalize(sunPos - observerPos)
         const sunDir = sunWorldPos.clone().sub(observerPlanetWorldPos).normalize()
         const planetDir = worldPos.clone().sub(observerPlanetWorldPos).normalize()
         const phaseCos = sunDir.dot(planetDir)
-        // 外行星从内行星看：相位角小，几乎全相（phaseCos ≈ 1 为冲日，最亮）
-        // phaseCos ≈ 0 为合日，最暗但不可见（在太阳方向）
         const phaseFactor = 0.5 + 0.5 * Math.max(0, phaseCos)
         
-        // 距离衰减：亮度 ∝ 1/distance²
-        // 取最小距离（冲日时）为 distance_opposition = a_outer - a_observer
         const minDist = body.orbitalElements!.semiMajorAxis - observerPlanet.orbitalElements!.semiMajorAxis
         const distanceFactor = Math.pow(minDist / distanceToObserver, 2)
-        
-        // 综合亮度
         const brightness = phaseFactor * distanceFactor
         
         opacity = 0.5 + brightness * 0.45
@@ -1005,15 +1064,23 @@ function PlanetRingArc({ observerPlanet, latitude }: { observerPlanet: Celestial
   )
 }
 
-// 相机控制器
+// 相机控制器 - 使用 ENU 旋转轴，球面切平面视角
 function CameraController({
   fov,
   yawRef,
-  pitchRef
+  pitchRef,
+  enuUp,
+  enuEast,
+  enuNorth,
+  observerPos
 }: {
   fov: number
   yawRef: React.MutableRefObject<number>
   pitchRef: React.MutableRefObject<number>
+  enuUp: THREE.Vector3
+  enuEast: THREE.Vector3
+  enuNorth: THREE.Vector3
+  observerPos: THREE.Vector3
 }) {
   const { camera } = useThree()
 
@@ -1023,9 +1090,25 @@ function CameraController({
       camera.updateProjectionMatrix()
     }
 
-    // 应用旋转：先绕Y轴（yaw），再绕X轴（pitch）
-    const euler = new THREE.Euler(pitchRef.current, yawRef.current, 0, 'YXZ')
-    camera.quaternion.setFromEuler(euler)
+    // 相机位置：观察者上方
+    const eyeHeight = 0.1
+    camera.position.copy(observerPos).addScaledVector(enuUp, eyeHeight)
+
+    // 相机 up 方向 = 天顶（始终垂直于切平面）
+    camera.up.copy(enuUp)
+
+    // 默认朝向：平视北方（沿切平面水平）
+    let lookDir = enuNorth.clone().normalize()
+
+    // yaw：绕天顶轴旋转（左右，始终平行于切平面）
+    lookDir.applyAxisAngle(enuUp, yawRef.current)
+
+    // pitch：绕相机当前的 east 轴旋转（上下，始终垂直于切平面）
+    const currentEast = enuEast.clone().applyAxisAngle(enuUp, yawRef.current)
+    lookDir.applyAxisAngle(currentEast, pitchRef.current)
+
+    // 设置相机看向计算出的方向
+    camera.lookAt(camera.position.clone().add(lookDir))
   })
 
   return null
@@ -1101,13 +1184,45 @@ function SurfaceViewScene({
     return buildENUBasis(latitude, longitude, planetRotationAngle, axialTilt, planet.radius)
   }, [latitude, longitude, planetRotationAngle, axialTilt, planet.radius])
 
+  // 将 ENU 基向量旋转到视觉场景坐标系（天顶=+Y, 东=+X, 北=+Z）
+  // 不再使用 visualBasis 和 visualHorizontalToWorldDir
+  // 所有局部对象放在 Group 内使用局部 ENU 坐标
+
+  // 球面切平面 Group 的 world 矩阵
+  // 将局部 ENU 坐标 (X=东, Y=天顶, Z=北) 映射到行星本地世界空间
+  const surfaceGroupMatrix = useMemo(() => {
+    const m = new THREE.Matrix4()
+    m.makeBasis(enuBasis.east, enuBasis.up, enuBasis.north)
+    m.setPosition(enuBasis.position.x, enuBasis.position.y, enuBasis.position.z)
+    return m
+  }, [enuBasis])
+
   // 应用大气折射修正
   const correctedAltitude = atmosphereRefraction 
     ? applyAtmosphericRefraction(sunAltAstro, refractionCoefficient)
     : sunAltAstro
-  const sunDirection = horizontalToWorldDir(correctedAltitude, sunAzAstro, enuBasis.up, enuBasis.east, enuBasis.north)
-  
-  // 为清晰起见，将修正后的高度角赋值给新变量
+
+  // 在局部 ENU 坐标中计算太阳方向（X=东, Y=天顶, Z=北）
+  const sunDirLocal = useMemo(() => {
+    const cosH = Math.cos(correctedAltitude)
+    const sinH = Math.sin(correctedAltitude)
+    const cosA = Math.cos(sunAzAstro)
+    const sinA = Math.sin(sunAzAstro)
+    // A=0 → 北: dir=(0, 0, cosH) = +Z
+    // A=π/2 → 东: dir=(cosH, 0, 0) = +X
+    // h=π/2 → 天顶: dir=(0, 1, 0) = +Y
+    return new THREE.Vector3(cosH * sinA, sinH, cosH * cosA)
+  }, [correctedAltitude, sunAzAstro])
+
+  // 世界空间太阳方向（用于 DirectionalLight、SkyDome 等 Group 外部对象）
+  const sunDirWorld = useMemo(() => {
+    // 将局部方向转换到世界空间
+    return new THREE.Vector3()
+      .addScaledVector(enuBasis.east, sunDirLocal.x)
+      .addScaledVector(enuBasis.up, sunDirLocal.y)
+      .addScaledVector(enuBasis.north, sunDirLocal.z)
+  }, [sunDirLocal, enuBasis])
+
   const sunAltitude = correctedAltitude
 
   // 昼夜因子：白天 1，夜晚 0
@@ -1117,85 +1232,111 @@ function SurfaceViewScene({
 
   return (
     <>
-      <CameraController fov={fov} yawRef={yawRef} pitchRef={pitchRef} />
+      <CameraController fov={fov} yawRef={yawRef} pitchRef={pitchRef} enuUp={enuBasis.up} enuEast={enuBasis.east} enuNorth={enuBasis.north} observerPos={enuBasis.position} />
+
+      {/* 观测者调试信息面板 — 显示经纬度 + 太阳方位 */}
+      <Html position={[0, 0, 0]} fullscreen style={{ pointerEvents: 'none' }}>
+        <div style={{
+          position: 'absolute',
+          top: 8,
+          right: 8,
+          padding: '6px 10px',
+          borderRadius: 6,
+          backgroundColor: 'rgba(0,0,0,0.55)',
+          backdropFilter: 'blur(4px)',
+          color: '#ccc',
+          fontSize: 11,
+          fontFamily: 'monospace',
+          lineHeight: '18px',
+          textAlign: 'right',
+        }}>
+          <div>纬度 {(latitude * 180/Math.PI).toFixed(1)}°{latitude >= 0 ? 'N' : 'S'}  /  经度 {(longitude * 180/Math.PI).toFixed(1)}°{longitude >= 0 ? 'E' : 'W'}</div>
+          <div>太阳高度 {sunAltitude >= 0 ? '+' : ''}{(sunAltitude * 180/Math.PI).toFixed(1)}°  /  方位 {(sunAzAstro * 180/Math.PI).toFixed(1)}°</div>
+          <div style={{ color: dayFactor > 0.5 ? '#ffcc00' : dayFactor > 0.1 ? '#ff8800' : '#6677aa' }}>
+            {dayFactor > 0.9 ? '☀ 正午' : dayFactor > 0.5 ? '🌤 白天' : dayFactor > 0.1 ? '🌅 晨昏' : '🌙 夜晚'}
+          </div>
+        </div>
+      </Html>
 
       {/* 环境光：夜间降低 */}
       <ambientLight intensity={0.05 + dayFactor * 0.35} />
 
-
-      {/* 太阳光 */}
+      {/* 方向光源在 Group 外，使用世界空间太阳方向 */}
       <directionalLight
-        position={sunDirection.clone().multiplyScalar(100)}
+        position={sunDirWorld.clone().multiplyScalar(100)}
         intensity={Math.max(0.05, Math.sin(sunAltitude)) * 4 * dayFactor}
         color="#fffde0"
       />
 
-      {/* 天空穹顶 */}
+      {/* 天空穹顶在 Group 外，使用世界空间太阳方向 */}
       <SkyDome
-        sunDirection={sunDirection}
+        sunDirection={sunDirWorld}
         sunAltitude={sunAltitude}
         atmosphereColor={atmosphereColor}
+        observerPos={enuBasis.position}
+        enuUp={enuBasis.up}
       />
 
-      {/* 星空 */}
-      <StarField sunAltitude={sunAltitude} />
-      
-      {/* 星座连线 */}
-      {showConstellations && (
-        <ConstellationLines lineWidth={constellationLineWidth} />
-      )}
-      
-      {/* 黄道线 */}
-      {showEcliptic && (
-        <EclipticLine lineWidth={eclipticLineWidth} axialTilt={axialTilt} sunDirection={sunDirection} />
-      )}
-      
-      {/* 地平线 */}
-      {showHorizon && (
-        <HorizonCircle />
-      )}
+      {/* ===== 球面切平面 Group ===== */}
+      <group matrix={surfaceGroupMatrix} matrixAutoUpdate={false}>
+        {/* 星空 */}
+        <StarField sunAltitude={sunAltitude} />
 
-      {/* 方向标识 */}
-      <DirectionMarkers north={enuBasis.north} east={enuBasis.east} />
+        {/* 星座连线 */}
+        {showConstellations && (
+          <ConstellationLines lineWidth={constellationLineWidth} />
+        )}
 
-      {/* 天体运行轨迹 */}
-      <CelestialTrajectory 
-        celestialBodies={celestialBodies} 
-        observerPlanet={planet}
-        globalTime={globalTime}
-        observerPlanetWorldPos={observerPlanetWorldPos}
-        latitude={latitude}
-        longitude={longitude}
-      />
+        {/* 黄道线 - 在局部坐标中计算 */}
+        {showEcliptic && (
+          <EclipticLineLocal lineWidth={eclipticLineWidth} axialTilt={axialTilt} sunDirLocal={sunDirLocal} enuBasis={enuBasis} />
+        )}
 
-      {/* 太阳 */}
-      <Sun direction={sunDirection} altitude={sunAltitude} starRadius={celestialBodies.find(b => b.type === 'star')?.radius ?? 8.0} />
+        {/* 地平线 - XZ 平面 = 切平面 */}
+        {showHorizon && (
+          <HorizonCircle />
+        )}
 
-      {/* 天体标记 */}
-      <CelestialMarkers
-        celestialBodies={celestialBodies}
-        observerPlanet={planet}
-        globalTime={globalTime}
-        observerPlanetWorldPos={observerPlanetWorldPos}
-        latitude={latitude}
-        longitude={longitude}
-        atmosphereRefraction={atmosphereRefraction}
-        refractionCoefficient={refractionCoefficient}
-        markerSizeScale={markerSizeScale}
-      />
+        {/* 方向标识 - 局部 ENU 坐标 */}
+        <DirectionMarkers />
 
-      {/* 行星环弧形投影 */}
-      <PlanetRingArc observerPlanet={planet} latitude={latitude} />
+        {/* 天体运行轨迹 - 在局部坐标中计算 */}
+        <CelestialTrajectoryLocal
+          celestialBodies={celestialBodies}
+          observerPlanet={planet}
+          globalTime={globalTime}
+          observerPlanetWorldPos={observerPlanetWorldPos}
+          latitude={latitude}
+          longitude={longitude}
+          enuBasis={enuBasis}
+        />
 
-      {/* 地面 */}
-      <Ground planet={planet} sunDirection={sunDirection} sunAltitude={sunAltitude} observerLat={latitude} observerLon={longitude} />
+        {/* 太阳 - 局部坐标 */}
+        <Sun direction={sunDirLocal} altitude={sunAltitude} starRadius={celestialBodies.find(b => b.type === 'star')?.radius ?? 8.0} />
 
-      {/* 大气辉光 */}
-      <AtmosphereGlow
-        sunDirection={sunDirection}
-        show={showAtmosphere}
-        atmosphereColor={atmosphereColor}
-      />
+        {/* 天体标记 - 局部坐标 */}
+        <CelestialMarkersLocal
+          celestialBodies={celestialBodies}
+          observerPlanet={planet}
+          globalTime={globalTime}
+          observerPlanetWorldPos={observerPlanetWorldPos}
+          latitude={latitude}
+          longitude={longitude}
+          atmosphereRefraction={atmosphereRefraction}
+          refractionCoefficient={refractionCoefficient}
+          markerSizeScale={markerSizeScale}
+          enuBasis={enuBasis}
+        />
+
+        {/* 行星环 - 局部坐标 */}
+        <PlanetRingArc observerPlanet={planet} latitude={latitude} />
+
+        {/* 地面 - 局部坐标 Y=-0.5 */}
+        <Ground planet={planet} sunDirection={sunDirLocal} sunAltitude={sunAltitude} observerLat={latitude} observerLon={longitude} />
+      </group>
+
+      {/* 大气辉光在 Group 外，使用世界方向 */}
+      <AtmosphereGlow sunDirection={sunDirWorld} show={showAtmosphere} atmosphereColor={atmosphereColor} observerPos={enuBasis.position} enuUp={enuBasis.up} />
     </>
   )
 }
@@ -1234,7 +1375,7 @@ const SurfaceView = forwardRef<SurfaceViewHandle, SurfaceViewProps>(({
 
   return (
     <Canvas
-      camera={{ position: [0, 0.1, 0], fov, near: 0.01, far: 2000 }}
+      camera={{ position: [0, 0, 0], fov, near: 0.01, far: 2000 }}
       gl={{
         antialias: true,
         powerPreference: 'high-performance'

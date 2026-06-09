@@ -9,9 +9,11 @@ import type { CelestialBody } from '../types'
 
 interface ControlPanelProps {
   isMobilePortrait: boolean
+  isMobileLandscape: boolean
+  isMobile: boolean
 }
 
-export default function ControlPanel({ isMobilePortrait }: ControlPanelProps) {
+export default function ControlPanel({ isMobilePortrait, isMobileLandscape, isMobile }: ControlPanelProps) {
   const {
     celestialBodies,
     timeSystem,
@@ -35,8 +37,6 @@ export default function ControlPanel({ isMobilePortrait }: ControlPanelProps) {
   } = useStore()
 
   const [mobileExpanded, setMobileExpanded] = useState(false)
-  const [showFocusPanel, setShowFocusPanel] = useState(false)
-  const [showVisualPanel, setShowVisualPanel] = useState(false)
 
   const timeScaleSliderRef = useRef<HTMLInputElement>(null)
 
@@ -84,82 +84,150 @@ export default function ControlPanel({ isMobilePortrait }: ControlPanelProps) {
     b.type === 'planet' || b.type === 'moon'
   )
 
+  // ─── 移动端横屏布局：Canvas 全高 + 右侧控制面板 ───
+  if (isMobileLandscape) {
+    return (
+      <div className="absolute top-0 right-0 bottom-0 z-30 w-[200px] bg-gray-900/90 backdrop-blur-sm border-l border-gray-700/50 flex flex-col slim-scrollbar overflow-y-auto safe-top safe-bottom">
+        {/* 时间控制 */}
+        <div className="px-2 py-2 border-b border-gray-700/30 space-y-2">
+          <div className="flex items-center justify-between">
+            <button onClick={handleTogglePause} className={`touch-btn p-1.5 rounded-lg transition-colors ${!timeSystem.isPaused ? 'bg-blue-600/60 text-white' : 'bg-gray-700/50 text-gray-300'}`}>
+              {timeSystem.isPaused ? <Play size={14} /> : <Pause size={14} />}
+            </button>
+            <span className="text-[10px] text-gray-400 font-mono">{timeSystem.timeScale.toFixed(1)}×</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <button onClick={() => changeSpeed(-5)} className="touch-btn p-1 rounded bg-gray-700/50 text-gray-300 hover:bg-gray-600">
+              <Rewind size={12} />
+            </button>
+            <input
+              ref={timeScaleSliderRef}
+              type="range"
+              min="0.1" max="100" step="0.1"
+              defaultValue={timeSystem.timeScale}
+              onChange={(e) => handleTimeScaleChange(parseFloat(e.target.value))}
+              className="flex-1 h-6 accent-blue-400"
+            />
+            <button onClick={() => changeSpeed(5)} className="touch-btn p-1 rounded bg-gray-700/50 text-gray-300 hover:bg-gray-600">
+              <FastForward size={12} />
+            </button>
+          </div>
+        </div>
+
+        {/* 视图控制 */}
+        <div className="px-2 py-2 border-b border-gray-700/30">
+          <div className="text-[10px] text-gray-500 mb-1.5">视图</div>
+          <div className="grid grid-cols-3 gap-1">
+            <button onClick={() => setDistanceScale(Math.max(0.5, distanceScale - 1))}
+              className="touch-btn py-1.5 rounded bg-gray-700/40 text-gray-300 text-[10px] hover:bg-gray-600/50 flex items-center justify-center gap-0.5">
+              <Minimize2 size={11} />−
+            </button>
+            <button onClick={() => { setFocusBody(null); selectBody(null) }}
+              className="touch-btn py-1.5 rounded bg-gray-700/40 text-gray-300 text-[10px] hover:bg-gray-600/50">
+              全景
+            </button>
+            <button onClick={() => setDistanceScale(Math.min(20, distanceScale + 1))}
+              className="touch-btn py-1.5 rounded bg-gray-700/40 text-gray-300 text-[10px] hover:bg-gray-600/50 flex items-center justify-center gap-0.5">
+              <Maximize2 size={11} />+
+            </button>
+          </div>
+        </div>
+
+        {/* 显示选项 */}
+        <div className="px-2 py-2 border-b border-gray-700/30">
+          <div className="text-[10px] text-gray-500 mb-1.5">显示</div>
+          <div className="grid grid-cols-3 gap-1">
+            <button onClick={toggleOrbits} className={`touch-btn py-1.5 rounded text-[10px] transition-colors ${showOrbits ? 'bg-blue-600/60 text-white' : 'bg-gray-700/40 text-gray-300'}`}>
+              <CircleOff size={11} />
+            </button>
+            <button onClick={() => setShowAtmosphere(!showAtmosphere)} className={`touch-btn py-1.5 rounded text-[10px] transition-colors ${showAtmosphere ? 'bg-cyan-600/60 text-white' : 'bg-gray-700/40 text-gray-300'}`}>
+              <Gauge size={11} />
+            </button>
+            <button onClick={() => setShowRings(!showRings)} className={`touch-btn py-1.5 rounded text-[10px] transition-colors ${showRings ? 'bg-amber-600/60 text-white' : 'bg-gray-700/40 text-gray-300'}`}>
+              <Globe size={11} />
+            </button>
+          </div>
+        </div>
+
+        {/* 天体列表 */}
+        <div className="flex-1 overflow-y-auto slim-scrollbar px-2 py-2">
+          <div className="text-[10px] text-gray-500 mb-1.5">天体</div>
+          <div className="space-y-1">
+            {planets.map((planet) => (
+              <button
+                key={planet.id}
+                onClick={() => handlePlanetClick(planet)}
+                className={`touch-btn w-full py-1.5 px-2 rounded text-[10px] text-left transition-all
+                  ${selectedBody?.id === planet.id
+                    ? 'bg-blue-600/70 text-white'
+                    : 'bg-gray-700/30 text-gray-300 hover:bg-gray-600/40'}`}
+              >
+                {planet.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   // ─── 移动端竖屏布局 ───
   if (isMobilePortrait) {
     return (
       <div className={`
         relative bg-gray-900/95 border-t border-gray-700/50 safe-bottom
         transition-all duration-300 ease-in-out
-        ${mobileExpanded ? 'flex-1' : 'h-[14vh]'}
+        ${mobileExpanded ? 'flex-[1]' : 'h-[10vh]'}
       `}>
-        <div className="flex items-center justify-between px-3 py-1.5 border-b border-gray-700/30">
-          <div className="flex items-center gap-2">
-            <button onClick={handleTogglePause} className={btnSmActive(!timeSystem.isPaused)}>
-              {timeSystem.isPaused ? <Play size={16} /> : <Pause size={16} />}
+        {/* 顶栏：播放 + 流速滑块 + 展开 */}
+        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-gray-700/30">
+          <button onClick={handleTogglePause} className={`touch-btn p-2 rounded-lg transition-colors ${!timeSystem.isPaused ? 'bg-blue-600/60 text-white' : 'bg-gray-700/50 text-gray-300'}`}>
+            {timeSystem.isPaused ? <Play size={15} /> : <Pause size={15} />}
+          </button>
+
+          <div className="flex items-center gap-1.5 flex-1 min-w-0">
+            <button onClick={() => changeSpeed(-5)} className="touch-btn p-1.5 rounded bg-gray-700/40 text-gray-300 hover:bg-gray-600/50">
+              <Rewind size={13} />
             </button>
-            <button onClick={() => changeSpeed(-1)} className={btnSmall}>
-              <Rewind size={14} />
+            <input
+              ref={timeScaleSliderRef}
+              type="range"
+              min="0.1" max="100" step="0.1"
+              defaultValue={timeSystem.timeScale}
+              onChange={(e) => handleTimeScaleChange(parseFloat(e.target.value))}
+              className="flex-1 h-7 accent-blue-400"
+              style={{ touchAction: 'none' }}
+            />
+            <button onClick={() => changeSpeed(5)} className="touch-btn p-1.5 rounded bg-gray-700/40 text-gray-300 hover:bg-gray-600/50">
+              <FastForward size={13} />
             </button>
-            <button onClick={() => changeSpeed(1)} className={btnSmall}>
-              <FastForward size={14} />
-            </button>
-            <span className="text-xs text-gray-400 font-mono ml-1">
+            <span className="text-[10px] text-gray-400 font-mono w-10 text-right shrink-0 tabular-nums">
               {timeSystem.timeScale.toFixed(1)}×
             </span>
           </div>
 
-          <div className="text-xs text-gray-300 truncate max-w-[30vw]">
-            {selectedBody ? `🔭 ${selectedBody.name}` : '浏览模式'}
-          </div>
-
-          <div className="flex items-center gap-1">
-            <button onClick={() => setShowFocusPanel(!showFocusPanel)}
-              className={btnSmActive(showFocusPanel)}>
-              <Globe size={15} />
-            </button>
-            <button onClick={() => setShowVisualPanel(!showVisualPanel)}
-              className={btnSmActive(showVisualPanel)}>
-              <Eye size={15} />
-            </button>
-            <button onClick={() => setMobileExpanded(!mobileExpanded)}
-              className={`${btnSmall} ${mobileExpanded ? 'bg-blue-600/50' : ''}`}>
-              <ChevronUp size={16}
-                style={{ transform: mobileExpanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.3s' }}
-              />
-            </button>
-          </div>
-        </div>
-
-        <div className="px-3 py-1.5 flex items-center gap-2">
-          <span className="text-[10px] text-gray-500 shrink-0">流速</span>
-          <input
-            ref={timeScaleSliderRef}
-            type="range"
-            min="0.1"
-            max="100"
-            step="0.1"
-            defaultValue={timeSystem.timeScale}
-            onChange={(e) => handleTimeScaleChange(parseFloat(e.target.value))}
-            className="flex-1 h-8 accent-blue-400"
-            style={{ touchAction: 'none' }}
-          />
-          <button onClick={resetTimeScale} className="text-[10px] text-gray-500 px-1.5 py-0.5 rounded bg-gray-800 hover:bg-gray-700">
-            1×
+          <button onClick={() => setMobileExpanded(!mobileExpanded)}
+            className={`touch-btn p-2 rounded-lg transition-all duration-200 ${mobileExpanded ? 'bg-blue-600/50 rotate-180' : 'bg-gray-700/40'}`}>
+            <ChevronUp size={16} />
           </button>
         </div>
 
-        <div className={`overflow-y-auto transition-all duration-300 ${mobileExpanded ? 'max-h-[50vh] opacity-100' : 'max-h-0 opacity-0'}`}
-          style={{ pointerEvents: mobileExpanded ? 'auto' : 'none' }}>
+        {/* 展开面板 */}
+        <div className={`
+          overflow-y-auto slim-scrollbar transition-all duration-300 ease-in-out
+          ${mobileExpanded ? 'max-h-[55vh] opacity-100 py-1' : 'max-h-0 opacity-0 py-0'}
+        `} style={{ pointerEvents: mobileExpanded ? 'auto' : 'none' }}>
           
-          <div className="px-3 py-2">
-            <div className="text-[11px] text-gray-500 mb-1.5">天体聚焦</div>
-            <div className="grid grid-cols-4 gap-1.5">
+          {/* 天体列表 */}
+          <div className="px-3 py-1.5">
+            <div className="text-[10px] text-gray-500 mb-1.5">天体</div>
+            <div className="flex flex-wrap gap-1.5">
               {planets.map((planet) => (
                 <button
                   key={planet.id}
                   onClick={() => handlePlanetClick(planet)}
                   className={`
-                    py-1.5 px-1 rounded-lg text-[11px] leading-tight text-center transition-all
+                    touch-btn py-1.5 px-2.5 rounded-full text-[11px] leading-tight transition-all
                     ${selectedBody?.id === planet.id
                       ? 'bg-blue-600/80 text-white ring-1 ring-blue-400'
                       : 'bg-gray-800/60 text-gray-300 hover:bg-gray-700/60'}
@@ -168,55 +236,40 @@ export default function ControlPanel({ isMobilePortrait }: ControlPanelProps) {
                   {planet.name}
                 </button>
               ))}
+              <button onClick={() => { selectBody(null); setFocusBody(null) }}
+                className="touch-btn py-1.5 px-2.5 rounded-full text-[11px] bg-gray-700/30 text-gray-400 hover:bg-gray-600/50">
+                全景
+              </button>
             </div>
           </div>
 
-          {showFocusPanel && (
-            <div className="px-3 py-2 border-t border-gray-700/30">
-              <div className="text-[11px] text-gray-400 mb-1.5">视图控制</div>
-              <div className="flex flex-wrap gap-1.5">
-                <button onClick={() => { setFocusBody(selectedBody!); setShowFocusPanel(false) }}
-                  className="px-2 py-1 rounded text-[11px] bg-gray-800 text-gray-300 hover:bg-gray-700">
-                  聚焦选中
-                </button>
-                <button onClick={() => { setFocusBody(null); selectBody(null); setShowFocusPanel(false) }}
-                  className="px-2 py-1 rounded text-[11px] bg-gray-800 text-gray-300 hover:bg-gray-700">
-                  全景视图
-                </button>
+          {/* 快捷操作 */}
+          <div className="px-3 py-1.5 border-t border-gray-700/30">
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1 text-[10px]">
+                <span className="text-gray-500">缩放</span>
                 <button onClick={() => setDistanceScale(Math.max(0.5, distanceScale - 1))}
-                  className="px-2 py-1 rounded text-[11px] bg-gray-800 text-gray-300 hover:bg-gray-700">
-                  <Minimize2 size={12} className="inline mr-1" />缩小
+                  className="touch-btn px-2 py-0.5 rounded bg-gray-800 text-gray-300 hover:bg-gray-700">
+                  <Minimize2 size={11} />
                 </button>
                 <button onClick={() => setDistanceScale(Math.min(20, distanceScale + 1))}
-                  className="px-2 py-1 rounded text-[11px] bg-gray-800 text-gray-300 hover:bg-gray-700">
-                  <Maximize2 size={12} className="inline mr-1" />放大
+                  className="touch-btn px-2 py-0.5 rounded bg-gray-800 text-gray-300 hover:bg-gray-700">
+                  <Maximize2 size={11} />
+                </button>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button onClick={toggleOrbits} className={`touch-btn p-1.5 rounded transition-colors ${showOrbits ? 'bg-blue-600/60 text-white' : 'bg-gray-800/50 text-gray-400'}`}>
+                  <CircleOff size={12} />
+                </button>
+                <button onClick={() => setShowAtmosphere(!showAtmosphere)} className={`touch-btn p-1.5 rounded transition-colors ${showAtmosphere ? 'bg-cyan-600/60 text-white' : 'bg-gray-800/50 text-gray-400'}`}>
+                  <Gauge size={12} />
+                </button>
+                <button onClick={() => setShowRings(!showRings)} className={`touch-btn p-1.5 rounded transition-colors ${showRings ? 'bg-amber-600/60 text-white' : 'bg-gray-800/50 text-gray-400'}`}>
+                  <Globe size={12} />
                 </button>
               </div>
             </div>
-          )}
-
-          {showVisualPanel && (
-            <div className="px-3 py-2 border-t border-gray-700/30">
-              <div className="text-[11px] text-gray-400 mb-1.5">显示选项</div>
-              <div className="flex flex-wrap gap-1.5">
-                <button onClick={toggleOrbits} className={btnSmActive(showOrbits)}>
-                  <CircleOff size={13} />
-                </button>
-                <button onClick={() => setShowNebula(!showNebula)} className={btnSmActive(showNebula)}>
-                  <Settings size={13} />
-                </button>
-                <button onClick={() => setShowAtmosphere(!showAtmosphere)} className={btnSmActive(showAtmosphere)}>
-                  <Gauge size={13} />
-                </button>
-                <button onClick={() => setShowRings(!showRings)} className={btnSmActive(showRings)}>
-                  <Globe size={13} />
-                </button>
-                <button onClick={() => setShowDustCloud(!showDustCloud)} className={btnSmActive(showDustCloud)}>
-                  <CircleOff size={13} />
-                </button>
-              </div>
-            </div>
-          )}
+          </div>
         </div>
       </div>
     )

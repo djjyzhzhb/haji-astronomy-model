@@ -1,6 +1,6 @@
-import { useRef, useMemo, useImperativeHandle, forwardRef, useEffect, useState } from 'react'
+import { useRef, useMemo, useImperativeHandle, forwardRef, useEffect, useState, type ReactNode } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { Billboard, Html } from '@react-three/drei'
+import { Html } from '@react-three/drei'
 import * as THREE from 'three'
 import { CelestialBody } from '../types'
 import { applyAtmosphericRefraction, worldToSkyPosition } from '../utils/surfaceCoords'
@@ -644,7 +644,7 @@ function Sun({ direction, altitude, starRadius }: { direction: THREE.Vector3; al
   const bodySize = starRadius * 4
 
   return (
-    <Billboard position={sunPosition}>
+    <MarkerBillboard position={sunPosition}>
       {/* 太阳本体 */}
       <mesh>
         <circleGeometry args={[bodySize, 32]} />
@@ -683,7 +683,7 @@ function Sun({ direction, altitude, starRadius }: { direction: THREE.Vector3; al
       <Html center position={[0, bodySize * 1.6, 0]} style={{ pointerEvents: 'none' }}>
         <div style={{ color: '#ffe8a0', fontSize: '14px', fontWeight: 'bold', textShadow: '0 0 4px black' }}>太阳</div>
       </Html>
-    </Billboard>
+    </MarkerBillboard>
   )
 }
 
@@ -827,7 +827,18 @@ function AtmosphereGlow({ sunDirection, show, atmosphereColor, observerPos, enuU
   )
 }
 
-// 天体标记（局部坐标版）- 在 Group 内使用局部 ENU 坐标
+// 自定义 Billboard：用 lookAt 替代 drei 的 Billboard（drei 版在父子矩阵变换下失效）
+function MarkerBillboard({ position, children }: { position: THREE.Vector3; children: ReactNode }) {
+  const ref = useRef<THREE.Group>(null)
+  useFrame(({ camera }) => {
+    if (ref.current) {
+      ref.current.lookAt(camera.position)
+    }
+  })
+  return <group ref={ref} position={position}>{children}</group>
+}
+
+// 天体标记物（行星、卫星、恒星）- 在局部 ENU 坐标中
 function CelestialMarkersLocal({
   celestialBodies,
   observerPlanet,
@@ -976,7 +987,7 @@ function CelestialMarkersLocal({
   return (
     <>
       {markers.map((marker, index) => (
-        <Billboard key={index} position={marker.position}>
+        <MarkerBillboard key={index} position={marker.position}>
           {/* 发光本体 */}
           <mesh>
             <circleGeometry args={[marker.size, 16]} />
@@ -1006,7 +1017,7 @@ function CelestialMarkersLocal({
           <Html center position={[0, marker.size + 5, 0]} style={{ pointerEvents: 'none' }}>
             <div style={{ color: 'white', fontSize: '11px', textShadow: '0 0 3px black' }}>{marker.name}</div>
           </Html>
-        </Billboard>
+        </MarkerBillboard>
       ))}
     </>
   )

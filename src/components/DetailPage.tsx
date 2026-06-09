@@ -17,7 +17,7 @@ import { QualityLevel, ViewPreset } from '../types'
 import { calculateDate } from '../utils/calendar'
 import { calculateSunSkyPosition } from '../utils/surfaceCoords'
 import { sunEclipticHigh, eclipticToEquatorial } from '../utils/astronomy'
-import { D_YEAR, SECONDS_PER_DAY } from '../config/constants'
+import { D_YEAR } from '../config/constants'
 
 // 质量设置配置
 const qualitySettings = {
@@ -250,10 +250,9 @@ function PlanetMesh({ customTexture }: { customTexture?: THREE.Texture | null })
   // 初始化时从星球数据同步参数（只在第一次进入时）
   useEffect(() => {
     if (planet) {
-      // 同步基础参数
+      // 同步基础参数（rotationSpeed 使用默认值 1.0，不再从 planet 覆盖）
       updateDetailPageState({
         axialTilt: planet.axialTilt || 0.41,
-        rotationSpeed: planet.rotationSpeed || 0.2,
       })
     }
   }, [planet?.id]) // 只在星球ID变化时触发
@@ -673,11 +672,13 @@ function DetailScene({ viewPreset, customTexture }: { viewPreset: ViewPreset; cu
   const orbitControlsRef = useRef<any>(null)
   const { camera } = useThree()
   
-  // 时间自动推进
+  // 时间自动推进（使用 getState 读取最新值，避免闭包陈旧）
+  // 与 Scene.tsx 统一：delta(秒) × timeScale = 每帧推进的本地日数
   useFrame((_state, delta) => {
-    if (!timeSystem.isPaused) {
-      const dtDays = (delta * timeSystem.timeScale) / SECONDS_PER_DAY
-      updateTimeSystem({ T: timeSystem.T + dtDays })
+    const ts = useStore.getState().timeSystem
+    if (!ts.isPaused) {
+      const dtDays = delta * ts.timeScale
+      updateTimeSystem({ T: ts.T + dtDays })
     }
   })
   
@@ -894,12 +895,12 @@ function DetailPage() {
       <div className="absolute top-0 inset-x-0 z-30 flex items-center justify-between px-2 py-1.5
         max-md:px-1 max-md:py-1
         bg-gradient-to-b from-black/60 to-transparent">
-        <div className="flex items-center gap-1.5 max-md:gap-1">
+        <div className="flex items-center gap-1.5 max-md:gap-1.5">
           {/* 返回按钮 */}
           <button
             onClick={handleBack}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-800/80 hover:bg-gray-700 text-white rounded-lg transition-colors backdrop-blur-md border border-gray-700/50 text-sm
-              max-md:px-2 max-md:py-1 max-md:text-xs max-md:gap-1"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-800/80 hover:bg-gray-700 text-white rounded-lg transition-colors backdrop-blur-md border border-gray-700/50 text-sm touch-btn
+              max-md:px-2.5 max-md:py-1.5 max-md:text-xs max-md:gap-1"
           >
             <ArrowLeft size={18} className="max-md:w-4 max-md:h-4" />
             <span className="max-md:hidden">返回</span>
@@ -908,8 +909,8 @@ function DetailPage() {
           {/* 地表/轨道切换 */}
           <button
             onClick={toggleSurfaceView}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-800/80 hover:bg-gray-700 text-white rounded-lg transition-colors backdrop-blur-md border border-gray-700/50 text-sm
-              max-md:px-2 max-md:py-1 max-md:text-xs max-md:gap-1"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-800/80 hover:bg-gray-700 text-white rounded-lg transition-colors backdrop-blur-md border border-gray-700/50 text-sm touch-btn
+              max-md:px-2.5 max-md:py-1.5 max-md:text-xs max-md:gap-1"
           >
             {isSurfaceView ? <Globe size={18} className="max-md:w-4 max-md:h-4" /> : <Mountain size={18} className="max-md:w-4 max-md:h-4" />}
             <span className="max-md:hidden">{isSurfaceView ? '轨道' : '地表'}</span>
@@ -918,11 +919,19 @@ function DetailPage() {
           {/* 地图按钮 */}
           <button
             onClick={() => setShowMap(!showMap)}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-800/80 hover:bg-gray-700 text-white rounded-lg transition-colors backdrop-blur-md border border-gray-700/50 text-sm
-              max-md:px-2 max-md:py-1 max-md:text-xs max-md:gap-1"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-800/80 hover:bg-gray-700 text-white rounded-lg transition-colors backdrop-blur-md border border-gray-700/50 text-sm touch-btn
+              max-md:px-2.5 max-md:py-1.5 max-md:text-xs max-md:gap-1"
           >
             <Map size={18} className="max-md:w-4 max-md:h-4" />
             <span className="max-md:hidden">地图</span>
+          </button>
+
+          {/* 参数控制按钮（仅移动端显示） */}
+          <button
+            onClick={() => setControlsOpen(!controlsOpen)}
+            className="md:hidden flex items-center gap-1.5 px-2.5 py-1.5 bg-gray-800/80 hover:bg-gray-700 text-white rounded-lg transition-colors backdrop-blur-md border border-gray-700/50 touch-btn"
+          >
+            <Settings size={16} />
           </button>
         </div>
 
@@ -1080,27 +1089,27 @@ function DetailPage() {
         {controlsOpen && !isSurfaceView && (
         <div className={`
           fixed z-40 transition-all duration-300 ease-in-out
-          max-md:bottom-0 max-md:inset-x-0 max-md:rounded-t-xl max-md:max-h-[35vh]
+          max-md:bottom-0 max-md:inset-x-0 max-md:rounded-t-2xl max-md:max-h-[70vh]
           md:top-12 md:right-0 md:h-[calc(100vh-3rem)] md:rounded-l-2xl
           w-72 max-md:w-full md:w-80 bg-gray-800/95 backdrop-blur-md
           border border-gray-700/50 shadow-2xl overflow-hidden
           flex flex-col
           ${controlsOpen ? 'translate-x-0 max-md:translate-y-0' : 'md:translate-x-full max-md:translate-y-full'}
         `}>
-          <div className="flex items-center justify-between px-3 py-2 border-b border-gray-700/50 shrink-0 max-md:px-2 max-md:py-1">
+          <div className="flex items-center justify-between px-3 py-2 border-b border-gray-700/50 shrink-0 max-md:px-3 max-md:py-2">
             <div className="flex items-center gap-1.5">
-              <Settings size={16} className="text-blue-400 max-md:w-3.5 max-md:h-3.5" />
+              <Settings size={16} className="text-blue-400 max-md:w-4 max-md:h-4" />
               <h3 className="text-white font-semibold text-sm max-md:text-xs">参数控制</h3>
             </div>
             <button
               onClick={() => setControlsOpen(false)}
-              className="p-1 hover:bg-gray-700 rounded-lg transition-colors text-gray-400 hover:text-white"
+              className="p-2 hover:bg-gray-700 rounded-lg transition-colors text-gray-400 hover:text-white touch-btn"
             >
-              <X size={16} className="max-md:w-3.5 max-md:h-3.5" />
+              <X size={16} className="max-md:w-4 max-md:h-4" />
             </button>
           </div>
 
-          <div className="flex-1 overflow-y-auto divide-y divide-gray-700/50 max-md:overflow-x-hidden">
+          <div className="flex-1 overflow-y-auto divide-y divide-gray-700/50 max-md:overflow-x-hidden slim-scrollbar">
             {/* 基本参数 */}
           <div className="p-3 max-md:p-1.5">
             <button

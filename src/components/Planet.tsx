@@ -157,15 +157,15 @@ function Planet({ body, moons }: PlanetProps) {
     ringMatMid.uniforms.sunDirection.value.set(sd.x, sd.y, sd.z)
     ringMatOuter.uniforms.sunDirection.value.set(sd.x, sd.y, sd.z)
 
-    // 使用时间差来更新自转，与时间缩放同步
+    // 使用时间差来更新自转，与时间缩放同步（1个本地日 = 1单位T = 2π弧度自转）
     const dt = T - previousTime.current
     if (meshRef.current && body.rotationSpeed) {
-      meshRef.current.rotation.y += body.rotationSpeed * dt
+      meshRef.current.rotation.y += 2 * Math.PI * dt
     }
 
     // 行星环跟随自转方向旋转（环内物质公转方向 = 行星自转方向）
     if (ringGroupRef.current && body.hasRing && showRings) {
-      ringGroupRef.current.rotation.z += (body.rotationSpeed || 0.01) * dt
+      ringGroupRef.current.rotation.z += 2 * Math.PI * dt
     }
 
     previousTime.current = T

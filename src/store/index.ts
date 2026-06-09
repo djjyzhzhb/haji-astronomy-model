@@ -162,7 +162,7 @@ const defaultCelestialBodies: CelestialBody[] = [
 ]
 
 const defaultDetailPageState: DetailPageState = {
-  rotationSpeed: 0.2,
+  rotationSpeed: 1.0,  // 1.0 = 正常速度（1本地日转1圈）
   planetScale: 1,
   showClouds: true,
   cloudSpeed: 0.3,

@@ -10,13 +10,26 @@ import { useStore } from './store'
 import { parseHash } from './utils/router'
 import * as THREE from 'three'
 
-// ─── 移动端竖屏检测（原生视口，不使用 CSS 旋转） ───
-function useMobilePortrait() {
-  const [isPortrait, setIsPortrait] = useState(false)
+// ─── 移动端检测（区分横屏/竖屏） ───
+interface MobileState {
+  isMobile: boolean      // 屏幕宽度 < 900
+  isPortrait: boolean    // 竖屏（宽 < 高）
+  isLandscape: boolean   // 横屏（宽 ≥ 高）
+}
+
+function useMobileState(): MobileState {
+  const [state, setState] = useState<MobileState>({ isMobile: false, isPortrait: false, isLandscape: false })
 
   useEffect(() => {
     const check = () => {
-      setIsPortrait(window.innerWidth < 900 && window.innerHeight > window.innerWidth)
+      const w = window.innerWidth
+      const h = window.innerHeight
+      const isMobile = w < 900
+      setState({
+        isMobile,
+        isPortrait: isMobile && h > w,
+        isLandscape: isMobile && w >= h,
+      })
     }
     check()
     window.addEventListener('resize', check)
@@ -27,7 +40,7 @@ function useMobilePortrait() {
     }
   }, [])
 
-  return isPortrait
+  return state
 }
 
 function SceneWrapper() {
@@ -108,7 +121,8 @@ function NebulaEffect({ brightness, distanceScale }: { brightness: number; dista
 function App() {
   const { selectedBody, backgroundColor, distanceScale, currentPage, navigateToDetail } = useStore()
   const cameraPosition = useMemo(() => [0, 30 * distanceScale, 50 * distanceScale], [distanceScale])
-  const isMobilePortrait = useMobilePortrait()
+  const { isMobile, isPortrait, isLandscape } = useMobileState()
+  const [showHint, setShowHint] = useState(true)
 
   useEffect(() => {
     const route = parseHash()
@@ -117,14 +131,42 @@ function App() {
     }
   }, [navigateToDetail])
 
+  // 竖屏时显示横屏旋转提示，3 秒后自动消失
+  useEffect(() => {
+    if (isPortrait) {
+      setShowHint(true)
+      const t = setTimeout(() => setShowHint(false), 3500)
+      return () => clearTimeout(t)
+    } else {
+      setShowHint(false)
+    }
+  }, [isPortrait])
+
   if (currentPage === 'detail') {
     return <DetailPage />
   }
 
   return (
     <div className="w-full h-full relative flex flex-col" style={{ backgroundColor }}>
-      {/* Canvas 区域：横屏占满，竖屏占 60vh */}
-      <div className={`relative ${isMobilePortrait ? 'mobile-canvas-area' : 'flex-1'}`}>
+      {/* 横屏旋转提示 */}
+      {isPortrait && showHint && (
+        <div className="orientation-hint animate-hint-pulse">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M1 12C1 5.9 5.9 1 12 1s11 4.9 11 11-4.9 11-11 11S1 18.1 1 12z"/>
+            <path d="M12 1v22M1 12h22"/>
+            <path d="M16 8l4-4M20 4l-4 4"/>
+          </svg>
+          <span>旋转手机获得更佳视野</span>
+        </div>
+      )}
+
+      {/* Canvas 区域 */}
+      <div className={`
+        relative w-full
+        ${isPortrait ? 'mobile-canvas-area' : ''}
+        ${isLandscape ? 'flex-1' : ''}
+        ${!isMobile ? 'flex-1' : ''}
+      `}>
         <Canvas
           key={distanceScale}
           camera={{ position: cameraPosition as [number, number, number], fov: 60 }}
@@ -140,10 +182,10 @@ function App() {
         </Canvas>
       </div>
       
-      {/* 控制面板：竖屏时底部堆叠 */}
-      <ControlPanel isMobilePortrait={isMobilePortrait} />
+      {/* 控制面板 */}
+      <ControlPanel isMobilePortrait={isPortrait} isMobileLandscape={isLandscape} isMobile={isMobile} />
       
-      {/* 性能监控（始终右上角） */}
+      {/* 性能监控 */}
       <div className="absolute top-2 right-2 z-20 max-md:top-1 max-md:right-1">
         <PerformanceMonitor />
       </div>
@@ -152,8 +194,9 @@ function App() {
       {selectedBody && (
         <div className={`
           absolute z-10
-          max-md:fixed max-md:bottom-[18vh] max-md:left-1/2 max-md:-translate-x-1/2 max-md:z-50 max-md:w-[90vw]
-          ${isMobilePortrait ? 'max-md:top-auto' : 'top-4 left-4'}
+          ${!isMobile ? 'top-4 left-4' : ''}
+          ${isPortrait ? 'max-md:fixed max-md:bottom-[16vh] max-md:left-1/2 max-md:-translate-x-1/2 max-md:z-50 max-md:w-[92vw]' : ''}
+          ${isLandscape ? 'max-md:top-2 max-md:left-2 max-md:max-w-[240px]' : ''}
         `}>
           <InfoPanel />
         </div>

@@ -39,58 +39,120 @@ canvas {
 }
 
 /* ===== 移动端触摸优化 ===== */
-@media (max-width: 767px) {
-  /* 增大所有 range 滑块的触控区域 */
+@media (max-width: 899px) {
   input[type="range"] {
-    min-height: 32px;
-  }
-  
-  /* 按钮最小触控尺寸 */
-  button, select {
     min-height: 36px;
-    min-width: 36px;
   }
 
-  /* 防止双击缩放 */
-  a, button, select, input[type="range"] {
+  button, select {
+    min-height: 40px;
+    min-width: 40px;
+    touch-action: manipulation;
+  }
+
+  a, input[type="range"] {
     touch-action: manipulation;
   }
 }
 
-/* ===== 移动端横屏 / 竖屏自适应 ===== */
-/* 横屏 (宽 ≥ 高)：标准桌面布局 */
-/* 竖屏 (宽 < 高)：Canvas 顶部 + 控制底部 的纵向堆叠 */
+/* ===== 移动端横屏（宽 ≥ 高）—— 用户横持手机时 ===== */
+@media (max-width: 899px) and (orientation: landscape) {
+  #root {
+    /* 横屏时取消安全区域padding，最大化显示面积 */
+    padding-top: 0px;
+    padding-bottom: 0px;
+  }
 
-@media (max-width: 899px) and (orientation: portrait) {
-  /* 竖屏时隐藏大标题 */
-  .mobile-title-only {
-    display: none !important;
+  .mobile-landscape-row {
+    display: flex !important;
+    flex-direction: row !important;
+  }
+
+  .mobile-landscape-canvas {
+    flex: 1 !important;
+    height: 100% !important;
+  }
+
+  .mobile-landscape-sidebar {
+    width: 220px !important;
+    height: 100% !important;
+    flex-shrink: 0 !important;
+    overflow-y: auto !important;
+    border-left: 1px solid rgba(75, 85, 99, 0.3) !important;
+  }
+
+  .mobile-landscape-bottom-bar {
+    height: auto !important;
+    max-height: 40vh !important;
+    flex-shrink: 0 !important;
   }
 }
 
-/* 竖屏 Canvas 占比 2/3，底部 UI 占 1/3 */
+/* ===== 移动端竖屏（宽 < 高）—— Canvas 顶部 + 控制底部 的纵向堆叠 ===== */
 @media (max-width: 899px) and (orientation: portrait) {
   .mobile-canvas-area {
-    height: 60vh !important;
+    height: 62vh !important;
     flex: none !important;
   }
-  .mobile-bottom-sheet {
-    max-height: 40vh !important;
+}
+
+/* 超小屏 竖屏 (< 400px) */
+@media (max-width: 399px) and (orientation: portrait) {
+  .mobile-canvas-area {
+    height: 56vh !important;
   }
 }
 
-/* 超小屏 (< 400px) 进一步紧凑 */
-@media (max-width: 399px) {
-  .mobile-canvas-area {
-    height: 55vh !important;
-  }
+/* ===== 横屏旋转提示浮层 ===== */
+.orientation-hint {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 999;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 20px;
+  border-radius: 16px;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(147, 197, 253, 0.2);
+  color: #93c5fd;
+  font-size: 14px;
+  text-align: center;
 }
 
 /* ===== iOS 安全区域适配 ===== */
 .safe-bottom {
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
-
 .safe-top {
   padding-top: env(safe-area-inset-top, 0px);
+}
+
+/* ===== 触控按钮的按压反馈 ===== */
+@media (max-width: 899px) {
+  .touch-btn:active {
+    transform: scale(0.92);
+    transition: transform 0.1s ease-out;
+  }
+}
+
+/* ===== 滚动条美化 ===== */
+.slim-scrollbar::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+.slim-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.slim-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.25);
+  border-radius: 2px;
+}
+.slim-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.4);
 }

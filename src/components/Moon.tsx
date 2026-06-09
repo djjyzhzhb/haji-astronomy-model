@@ -4,7 +4,7 @@ import * as THREE from 'three'
 import { CelestialBody } from '../types'
 import { useStore } from '../store'
 import { getTextureByType } from '../utils/textureGenerator'
-import { calculateOrbitalPositionScaled } from '../utils/keplerOrbit'
+import { calculateOrbitalPositionFromT, calculateOrbitalPositionScaled } from '../utils/keplerOrbit'
 
 interface MoonProps {
   body: CelestialBody
@@ -26,20 +26,29 @@ function Moon({ body }: MoonProps) {
   const previousTime = useRef(0)
 
   useFrame(() => {
+    const T = useStore.getState().timeSystem.T
+
+    // 公转位置：优先使用 orbitalPeriodDays（来自设定数据），否则回退
     if (groupRef.current && body.orbitalElements) {
-      const pos = calculateOrbitalPositionScaled(useStore.getState().timeSystem.T, body.orbitalElements, distanceScale, 30)
-      groupRef.current.position.set(pos.x, pos.y, pos.z)
+      let pos: { x: number; y: number; z: number }
+      if (body.orbitalPeriodDays) {
+        pos = calculateOrbitalPositionFromT(T, body.orbitalPeriodDays, body.orbitalElements)
+        groupRef.current.position.set(pos.x * distanceScale, pos.y * distanceScale, pos.z * distanceScale)
+      } else {
+        pos = calculateOrbitalPositionScaled(T, body.orbitalElements, distanceScale, 30)
+        groupRef.current.position.set(pos.x, pos.y, pos.z)
+      }
     } else if (groupRef.current && body.distance && body.orbitSpeed) {
-      const angle = useStore.getState().timeSystem.T * body.orbitSpeed * 0.1
+      const angle = T * body.orbitSpeed * 0.1
       groupRef.current.position.x = Math.cos(angle) * body.distance * distanceScale
       groupRef.current.position.z = Math.sin(angle) * body.distance * distanceScale
     }
     
-    // 使用时间差来更新自转，这样就和时间缩放同步了
-    if (meshRef.current && body.rotationSpeed) {
-      const delta = useStore.getState().timeSystem.T - previousTime.current
-      meshRef.current.rotation.y += body.rotationSpeed * delta
-      previousTime.current = useStore.getState().timeSystem.T
+    // 自转：每本地日自转一圈（2π rad），统一与行星自转逻辑一致
+    if (meshRef.current) {
+      const delta = T - previousTime.current
+      meshRef.current.rotation.y += 2 * Math.PI * delta
+      previousTime.current = T
     }
   })
 

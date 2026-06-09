@@ -54,8 +54,8 @@ function InfoPanel() {
   const body = isEditing && editableBody ? editableBody : selectedBody
 
   return (
-    <div className="w-80 max-sm:w-full bg-gray-900/90 backdrop-blur-sm rounded-xl border border-gray-700/50 overflow-hidden max-h-[80vh] overflow-y-auto">
-      <div className="flex items-center justify-between p-4 border-b border-gray-700/50 sticky top-0 bg-gray-900/95 z-10">
+    <div className="w-80 max-sm:w-full bg-gray-900/90 backdrop-blur-sm rounded-xl border border-gray-700/50 overflow-hidden max-h-[70vh] overflow-y-auto slim-scrollbar animate-scale-in">
+      <div className="flex items-center justify-between p-3 max-sm:p-2.5 border-b border-gray-700/50 sticky top-0 bg-gray-900/95 z-10">
         <div className="flex items-center gap-3">
           {getIcon()}
           <div>

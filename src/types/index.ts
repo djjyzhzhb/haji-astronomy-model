@@ -1,4 +1,5 @@
 import type { OrbitalElements } from '../utils/keplerOrbit'
+// OrbitalElements.meanAnomaly 为历元时刻 T=0 的平近点角（弧度）
 import type { TextureParams } from '../utils/textureGenerator'
 
 export type PageType = 'main' | 'detail'
@@ -12,7 +13,7 @@ export interface CelestialBody {
   orbitSpeed?: number // 保留用于向后兼容
   rotationSpeed?: number
   rotationPeriodHours?: number // 自转周期（小时）
-  orbitalPeriodDays?: number // 轨道周期（本地日）
+  orbitalPeriodDays?: number // 公转周期（本地日），用于统一时间T驱动轨道计算
   color: string
   emissiveColor?: string
   description: string
@@ -46,8 +47,11 @@ export interface CelestialBody {
 export type QualityLevel = 'low' | 'medium' | 'high' | 'ultra';
 export type ViewPreset = 'global' | 'equator' | 'north-pole' | 'south-pole' | 'sun-facing';
 
-// 时间系统参数
+// 时间系统参数（统一时间源）
 export interface TimeSystem {
+  T: number // 儒略日（本初子午线春分正午=0，单位：本地日）
+  timeScale: number // 全局时间倍速
+  isPaused: boolean // 全局暂停
   localDayHours: number // 本地日长度（小时）
   localYearDays: number // 本地年长度（本地日）
   localMonthDays: number // 本地月长度（本地日）
@@ -87,9 +91,9 @@ export interface DetailPageState {
   showAtmosphere: boolean;
   textureParams: TextureParams;
   qualityLevel: QualityLevel;
-  dayTime: number; // 0-1, 0=midnight, 0.5=noon (从 globalTime 派生)
-  yearTime: number; // 0-1, 默认0.25代表春季 (从 globalTime 派生)
-  globalTime: number; // 全局时间（秒），统一驱动所有天体运动
+  dayTime: number; // 0-1, 0=midnight, 0.5=noon (从 globalTime 派生) /** @deprecated 改为从 timeSystem.T 派生 */
+  yearTime: number; // 0-1, 默认0.25代表春季 (从 globalTime 派生) /** @deprecated 改为从 timeSystem.T 派生 */
+  globalTime: number; // 全局时间（秒），统一驱动所有天体运动 /** @deprecated 改为从 timeSystem.T 派生 */
   dayNightCycleSpeed: number;
   atmosphereGlowIntensity: number;
   atmosphereInnerRadius: number;
@@ -110,8 +114,6 @@ export interface DetailPageState {
 }
 
 export interface StoreState {
-  timeScale: number
-  isPaused: boolean
   showOrbits: boolean
   selectedBody: CelestialBody | null
   focusBody: CelestialBody | null
@@ -134,8 +136,6 @@ export interface StoreState {
   detailPageState: DetailPageState
   timeSystem: TimeSystem // 时间系统参数
   calendarSystem: CalendarSystem // 历法系统参数
-  setTimeScale: (scale: number) => void
-  togglePause: () => void
   toggleOrbits: () => void
   selectBody: (body: CelestialBody | null) => void
   setFocusBody: (body: CelestialBody | null) => void
@@ -162,6 +162,6 @@ export interface StoreState {
   toggleSurfaceView: () => void
   navigateToDetail: (planetId: string) => void
   navigateToMain: () => void
-  updateTimeSystem: (updates: Partial<TimeSystem>) => void
+  updateTimeSystem: (updates: Partial<TimeSystem>) => void // 统一时间系统更新（包含T、timeScale、isPaused及UI参数）
   updateCalendarSystem: (updates: Partial<CalendarSystem>) => void
 }

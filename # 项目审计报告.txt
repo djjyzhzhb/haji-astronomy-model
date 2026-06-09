@@ -1,0 +1,763 @@
+# 项目审计报告
+
+## Vite+React+Three.js 天象推演系统 —— 项目上下文提取与审计
+
+> 审计日期：2026-06-09  
+> 项目路径：`e:\哈吉语创制计划\天文模型\`  
+> 审计范围：全部 `src/` 源码 + 配置文件 + 设定文档
+
+---
+
+## 1. 技术栈确认
+
+| # | 问题 | 回答 | 证据 |
+|---|------|------|------|
+| 1 | Vite 版本 | **v6.3.5** | `package.json`: `"vite": "^6.3.5"` |
+| 2 | React 版本 | **18.3.1** | `package.json`: `"react": "^18.3.1"`, `"react-dom": "^18.3.1"` |
+| 3 | Three.js 版本 | **0.172.0** | `package.json`: `"three": "^0.172.0"`, `"@types/three": "^0.172.0"` |
+| 4 | 状态管理方案 | **Zustand v5.0.3** | `package.json`: `"zustand": "^5.0.3"`；单文件 Store：`src/store/index.ts` |
+| 5 | React Three Fiber (R3F) | **有**：`@react-three/fiber ^8.17.10` | `package.json`；`src/App.tsx` 使用 `<Canvas>`；`src/components/Scene.tsx` 中使用 `useFrame` |
+| 6 | TypeScript | **是**，`typescript ~5.8.3`，**严格模式未开启** | `tsconfig.json`: `"strict": false`；路径别名 `@/* → ./src/*` |
+| 7 | UI 组件库 | **Tailwind CSS 3.4.17 + lucide-react 0.511.0** | `package.json` + `tailwind.config.js`；纯自研组件，无 Ant Design/MUI |
+| 8 | 地图/观察点面板 | **纯 DOM Canvas 自研** | `MapPanel.tsx`：等距矩形投影 + 昼夜/云层 Perlin 噪声叠加层；点击获取经纬度 |
+
+---
+
+## 2. 文件结构审计
+
+```
+src/
+├── App.tsx                              ← 应用入口，R3F <Canvas> + 路由解析 + 移动端适配
+│
+├── components/
+│   ├── Scene.tsx                        ← 主场景核心：useFrame 驱动天体位置更新、设置 bodyPositions state、聚焦逻辑
+│   ├── Star.tsx                         ← 恒星：Mesh + PointLight×2 + 四层光晕 Mesh
+│   ├── Planet.tsx                       ← 行星：Mesh(SphereGeometry) + 行星环(RingGeometry×3) + 大气层 + 卫星子组件
+│   ├── Moon.tsx                         ← 卫星：Mesh(SphereGeometry) + 轨道位置计算
+│   ├── Orbit.tsx                        ← 轨道线：Line(BufferGeometry)，支持开普勒椭圆或降级圆形
+│   ├── AsteroidBelt.tsx                 ← 小行星带：Points(1500 粒子)，每帧更新粒子轨道位置
+│   ├── DustCloud.tsx                    ← 尘埃云：Points(800 粒子球壳)
+│   ├── ControlPanel.tsx                 ← 底部控制栏：时间倍速/暂停/轨道显隐/缩放/聚焦/视觉选项
+│   ├── InfoPanel.tsx                    ← 天体信息面板：描述/参数/聚焦/编辑
+│   ├── DetailPage.tsx                   ← 行星细节页（~1050行）：轨道视角 Canvas + 地表视角 SurfaceView + 地图面板 + 所有参数控制
+│   ├── SurfaceView.tsx                  ← 地表天象视图（~1280行）：天空穹顶着色器 + 星空 + 太阳 Billboard + 天体标记 + 轨迹预测 + 方向标识 + 地平线 + 黄道线
+│   ├── MapPanel.tsx                     ← 地图侧边面板（~500行）：等距矩形投影 + 海陆检测 + 昼夜阴影 + Perlin 云层
+│   └── PerformanceMonitor.tsx            ← FPS/帧时间/对象数监控
+│
+├── config/
+│   └── celestialBodies.ts               ← 注：已废弃，仅为空 export {}；数据已迁至 store
+│
+├── store/
+│   └── index.ts                         ← Zustand store：天体数据 + 时间控制 + 视觉参数 + 详情页状态 + 地表观测 + 历法系统
+│
+├── types/
+│   └── index.ts                         ← 全部 TypeScript 类型：CelestialBody, DetailPageState, SurfaceObservationState, TimeSystem, CalendarSystem, StoreState, OrbitalElements
+│
+├── utils/
+│   ├── keplerOrbit.ts                   ← 开普勒轨道计算：solveKeplerEquation, convertOrbitalToCartesian, calculateOrbitalPosition, getOrbitPoints
+│   ├── calendar.ts                      ← 历法计算：calculateDate(YEAR_DAYS=413), calculateSunDeclination
+│   ├── surfaceCoords.ts                 ← 地表坐标核心：calculateSunSkyPosition, worldToSkyPosition, altAzToDirection, applyAtmosphericRefraction, equatorialToHorizontal
+│   ├── router.ts                        ← Hash 路由：parseHash / setHash (#/detail/planetId)
+│   ├── textureGenerator.ts              ← 程序化纹理：generateTerrainTexture, generateCloudTexture, generateAtmosphereTexture, 等
+│   └── planetTextureCache.ts            ← 贴图缓存：usePlanetTexture hook + Image 缓存 + 噪声处理
+│
+├── main.tsx                             ← ReactDOM 入口
+└── index.css                            ← Tailwind 全局样式
+```
+
+---
+
+## 3. 坐标系与空间约定
+
+| # | 问题 | 回答 | 代码证据 |
+|---|------|------|----------|
+| 1 | Y-up 还是 Z-up？ | **Y-up**（Three.js 默认） | Three.js 默认坐标系；`keplerOrbit.ts:49` 注释："轨道主要在 X-Z 平面（赤道平面），Y 为竖直轴" |
+| 2 | 星球中心在原点？ | **恒星在原点 (0,0,0)**；行星/卫星按轨道偏移 | `Scene.tsx:36`：`newPositions[star.id] = new THREE.Vector3(0, 0, 0)` |
+| 3 | 半径单位？ | **抽象单位**，1 单位 ≈ 6000 km（设定推导） | `store/index.ts:44`：宜居行星 `radius: 2.0`，注释"略小于地球（12000km/6000=2.0）"；恒星 `radius: 8.0` |
+| 4 | "北"对应哪个世界轴？ | **+Y 是自转轴/北极方向** | `keplerOrbit.ts:62-63`：轨道坐标 `xOrbit` 和 `zOrbit` 构成 X-Z 平面，`y` 由倾角旋转产生；`surfaceCoords.ts:153`：`localY = planetRadius * sinLat`（南北方向/极轴） |
+| 5 | "东"对应哪个世界轴？ | **+X 是东方向（经度 90°）** | `surfaceCoords.ts:152`：`localX = planetRadius * cosLat * sinLon`（东西方向），lon=π/2 → +X；经度 0°=+Z |
+| 6 | 相机默认位置？ | **太空轨道视角（俯视）** | `App.tsx:112`：`cameraPosition = [0, 30 * distanceScale, 50 * distanceScale]`；`DetailPage.tsx:960`：`position: [0, 0, 6]` |
+| 7 | OrbitControls up 向量？ | **默认 (0,1,0)**（Three.js 默认值，未显式设置） | `App.tsx:57`：`<OrbitControls ...>` 无 `up` prop；`DetailPage.tsx:703`：同样无 `up` prop |
+| 8 | 经纬度 → 世界坐标转换？ | **有**，`worldToSkyPosition()` 在 `surfaceCoords.ts:135-222` | 完整实现：局部坐标 → 自转矩阵 → 轴倾角矩阵 → 世界坐标 → 天空方位角/高度角 |
+
+### 关键坐标约定总结
+
+```
+世界空间（Three.js 默认）：
+  +Y = 上（行星自转轴/北极，经轴倾角旋转后）
+  +X = 东（经度 90°E）
+  +Z = 本初子午线（经度 0°）
+
+轨道平面 = X-Z 平面（Y=0）
+恒星位于 (0,0,0)
+行星绕 Y 轴在 X-Z 平面内公转
+
+地表局部坐标系（右手术）：
+  东 = rotationAxis × up
+  北 = up × east
+  天顶 = 表面法线（从行星中心指向表面）
+```
+
+### 坐标系潜在矛盾
+
+**DirectionMarkers（地表视图的方向标识）与实际数学约定不一致：**
+
+`SurfaceView.tsx:364-371`：
+```ts
+北 = { x: 0, z: -markerRadius }  // -Z 方向
+东 = { x: markerRadius, z: 0 }   // +X 方向
+南 = { x: 0, z: markerRadius }   // +Z 方向
+```
+
+但这与 `worldToSkyPosition()` 中的东(+X)、北(+Y) 约定不同。DirectionMarkers 使用的是简化的 X-Z 平面方向指示，将 -Z 标记为"北"，但这仅在地表视图的地平圈（HorizonCircle 在 Y=0 平面）中有视觉意义。**天文模型集成时需注意，此处的"北"≠ 行星自转轴北极方向。**
+
+---
+
+## 4. 时间系统审计
+
+### 4.1 时间状态存储位置
+
+**存在两套独立的时间系统，互不连接！**
+
+| 系统 | 存储位置 | 类型 | 作用域 |
+|------|----------|------|--------|
+| 主场景时间 | `Scene.tsx` 中的 `timeRef.current` | `useRef<number>` | 主页面 3D 场景（行星公转 + 卫星运动） |
+| 详情页全局时间 | `detailPageState.globalTime` | Zustand store（`number`） | 详情页（行星自转 + 昼夜循环 + 地表天象） |
+
+### 4.2 时间变量类型与单位
+
+**主场景（Scene.tsx）**：
+```ts
+// Scene.tsx:23
+const timeRef = useRef(0)
+
+// Scene.tsx:27-29 (useFrame)
+useFrame((state, delta) => {
+  if (!isPaused) {
+    timeRef.current += delta * timeScale  // delta = 帧间隔(秒), timeScale = 倍速
+  }
+```
+
+- 类型：`number`（自增帧计数器）
+- 单位：**秒**（`delta` 来自 R3F useFrame 的 wall-clock seconds）
+- 累积方式：`timeRef.current += delta * timeScale`
+- 此时间用于 `calculateOrbitalPositionScaled(timeRef.current, elements, distanceScale, 50)`
+
+**详情页（DetailPage.tsx）**：
+```ts
+// DetailPage.tsx:763-772
+useEffect(() => {
+  if (isPaused || dayNightRef.current.speed === 0) return
+  const interval = setInterval(() => {
+    const newGlobalTime = dayNightRef.current.globalTime + dayNightRef.current.speed * 0.01 * DAY_IN_SECONDS
+    updateDetailPageState({
+      globalTime: newGlobalTime,
+      dayTime: (newGlobalTime / DAY_IN_SECONDS) % 1,    // 0-1
+      yearTime: (newGlobalTime / YEAR_IN_SECONDS) % 1    // 0-1
+    })
+  }, 16)
+  return () => clearInterval(interval)
+}, [isPaused, updateDetailPageState])
+```
+
+- 类型：`number`
+- 单位：**秒**（`DAY_IN_SECONDS = 24.15 * 3600 = 86,940`）
+- 累积方式：`setInterval` 每 16ms 累加
+- `dayTime`：`(globalTime / DAY_IN_SECONDS) % 1`，范围 [0, 1]，0=午夜，0.5=正午
+- `yearTime`：`(globalTime / YEAR_IN_SECONDS) % 1`，范围 [0, 1]，0=年初
+
+### 4.3 时间基准点
+
+**[未确认]** 没有明确的 epoch / 基准点。两套时间的初始值均为 0。不存在儒略日、J2000 或真实日历日期的概念。`globalTime = 0` 对应的是"第 1 年第 1 天的午夜 00:00"。
+
+### 4.4 时间流速控制
+
+| 参数 | 位置 | 范围 | 说明 |
+|------|------|------|------|
+| `timeScale` | Store（主场景） | 0.1 ~ 100 | 控制主场景行星公转速度 |
+| `isPaused` | Store（主场景） | boolean | 暂停主场景时间 |
+| `dayNightCycleSpeed` | detailPageState | 0 ~ ? | 控制详情页昼夜循环速度 |
+| `isPaused` (local) | DetailPage 组件 | boolean | 暂停详情页时间 |
+
+**不支持倒放**。`timeScale` 最小为 0.1。
+
+### 4.5 位置计算方式
+
+**每帧实时计算**，非预计算轨道点。
+
+主场景中（`Scene.tsx:27-68`），每帧在 `useFrame` 中：
+1. 累加 `timeRef.current`
+2. 遍历所有行星 → `calculateOrbitalPositionScaled()`
+3. 遍历所有卫星 → `calculateOrbitalPositionScaled()`
+4. 将结果写入 `bodyPositions` state → 触发 React 重渲染
+
+**核心计算代码**（`keplerOrbit.ts:85-105`）：
+```ts
+export function calculateOrbitalPosition(
+  time: number,
+  elements: OrbitalElements,
+  basePeriod: number = 1
+): { x: number; y: number; z: number } {
+  const period = calculateOrbitalPeriod(elements.semiMajorAxis) * basePeriod
+  const meanAnomaly = (elements.meanAnomaly + (2 * Math.PI * time) / period) % (2 * Math.PI)
+  const eccentricAnomaly = solveKeplerEquation(meanAnomaly, elements.eccentricity)
+  const trueAnomaly = 2 * Math.atan2(
+    Math.sqrt(1 + elements.eccentricity) * Math.sin(eccentricAnomaly / 2),
+    Math.sqrt(1 - elements.eccentricity) * Math.cos(eccentricAnomaly / 2)
+  )
+  return convertOrbitalToCartesian(trueAnomaly, elements)
+}
+```
+
+**降级简化路径**（无 `orbitalElements` 时）：
+```ts
+// Scene.tsx:44-47
+const angle = timeRef.current * planet.orbitSpeed * 0.1
+const x = Math.cos(angle) * planet.distance * distanceScale
+const z = Math.sin(angle) * planet.distance * distanceScale
+newPositions[planet.id] = new THREE.Vector3(x, 0, z)
+```
+
+### 4.6 时间与观察者经度的绑定
+
+**主场景：未绑定。** 主场景为太空轨道视角，无"本地时间"概念。
+
+**详情页（地表视角）：已绑定。** `dayTime` 和 `yearTime` 通过 `calculateSunSkyPosition()` 与纬度/经度结合计算太阳位置。但是 `dayTime` 本身是全局参数，不同经度看到的太阳位置由 `hourAngle = (dayTime - 0.5) * 2π + longitude` 体现。
+
+---
+
+## 5. 观察点系统审计
+
+### 5.1 观察点数据存储
+
+存于 Zustand store 的 `detailPageState.surfaceObservation`：
+```ts
+// types/index.ts:67-80
+export interface SurfaceObservationState {
+  latitude: number;              // 弧度
+  longitude: number;             // 弧度
+  isSurfaceView: boolean;        // 是否处于地表视角
+  fov: number;                   // 视野角度
+  atmosphereRefraction: boolean; // 大气折射开关
+  refractionCoefficient: number; // 0.1°~2.0°
+  markerSizeScale: number;       // 0.5x~3.0x
+  showConstellations: boolean;
+  constellationLineWidth: number;
+  showEcliptic: boolean;
+  eclipticLineWidth: number;
+  showHorizon: boolean;
+}
+```
+
+默认值：`latitude: 0, longitude: 0`（赤道、本初子午线）
+
+### 5.2 经纬度范围
+
+- 纬度：`[-π/2, π/2]`（弧度）→ 北纬为正
+- 经度：`[-π, π]`（弧度）→ 东经为正
+
+与 `surfaceCoords.ts` 和 `MapPanel.tsx` 中的约定一致：
+```ts
+// MapPanel.tsx:396-400
+const lonDeg = (x / imgWidth) * 360 - 180  // → [-180, 180]
+const latDeg = 90 - (y / imgHeight) * 180   // → [90, -90]
+onSelectPoint?.(latDeg * Math.PI / 180, lonDeg * Math.PI / 180)
+```
+
+### 5.3 海拔高度
+
+**无。** 当前所有计算假设观测者位于行星表面（`planetRadius` 作为地表半径）。`SurfaceObservationState` 中没有海拔字段。
+
+### 5.4 用户选点方式
+
+通过 `MapPanel.tsx` 的**点击**交互：
+```ts
+// MapPanel.tsx:384-401
+const handleMapClick = (e: React.MouseEvent<HTMLDivElement>) => {
+  const img = imgRef.current
+  const rect = img.getBoundingClientRect()
+  const x = e.clientX - rect.left
+  const y = e.clientY - rect.top
+  const lonDeg = (x / imgWidth) * 360 - 180
+  const latDeg = 90 - (y / imgHeight) * 180
+  setMarker({ x, y })
+  onSelectPoint?.(latDeg * Math.PI / 180, lonDeg * Math.PI / 180)
+}
+```
+
+不支持搜索或拖拽 Marker。
+
+### 5.5 观察点变化时的相机行为
+
+**瞬间跳转。** 当用户在地图面板点击新位置后，地表视角的相机方向（yaw/pitch）被重置为 `(0, 0)`，纬度和经度直接更新到 store。没有平滑过渡动画。
+
+### 5.6 "本地正午"/"地方时"概念
+
+**部分存在。** 
+
+在 `surfaceCoords.ts` 中：
+```ts
+// calculateSunSkyPosition
+const hourAngle = (dayTime - 0.5) * Math.PI * 2 + longitude;
+```
+
+`dayTime = 0.5` 时（全局正午 12:00），在经度=0 处为真正午（太阳在子午线上）。不同经度通过 `+ longitude` 偏移得到不同的地方时角。这与 basic 天文模型一致：**`dayTime` 代表格林尼治/本初子午线的地方时**。
+
+但 `dayTime` 和 `globalTime` 之间没有"时间方程"（Equation of Time）修正。太阳位置由 `calculateSunDeclination` 简单计算（基于 `yearProgress` 的余弦），未考虑轨道离心率导致的时差。
+
+---
+
+## 6. 现有渲染对象审计
+
+### 6.1 主场景（Scene.tsx → App.tsx）
+
+| 对象名 | Three.js 类型 | 数据来源 | 备注 |
+|--------|-------------|----------|------|
+| 恒星本体 | `Mesh` (SphereGeometry) + `PointLight`×2 | `celestialBodies` store | `meshBasicMaterial`，固定原点 (0,0,0)；PointLight distance=500/300，decay=0 |
+| 恒星光晕 | `Mesh`×4 (BackSide 球壳) | `celestialBodies` store + `starGlow` | 多层 scale (1.3x~3.2x) 半透明光晕，`AdditiveBlending` |
+| 行星本体 | `Mesh` (SphereGeometry 128×128) | `celestialBodies` + `sizeScale` + 贴图/程序化纹理 | `meshStandardMaterial`，自转通过 `meshRef.current.rotation.y` |
+| 行星大气 | `Mesh`×2 (BackSide 球壳) | `showAtmosphere` flag | scale 1.05x/1.1x，`BasicMaterial`，仅 `earth-like` 类型 |
+| 行星环 | `Mesh`×3 (RingGeometry) + `Points` | `body.hasRing` + `ringColor` + `showRings` | 内环(1.4r-1.8r)/中环(1.8r-2.1r)/外环(2.1r-2.4r)，`MeshStandardMaterial`，旋转`[-π/2.5, 0, 0]` |
+| 轨道线 | `Line` (BufferGeometry) | `orbitalElements` → `getOrbitPoints` (128 段) | 降级：圆形（`cos(angle)*radius, 0, sin(angle)*radius`）→ Y=0 平面 |
+| 卫星本体 | `Mesh` (SphereGeometry 32×32) | `celestialBodies` | 绕父行星公转，`useFrame` 更新位置 |
+| 星空背景 | `Stars` (drei) | 硬编码 | radius=150, depth=80, count=8000, factor=5 |
+| 星云 | `Mesh`×3 (SphereGeometry BackSide) | `showNebula` | 紫色(#4a148c)/蓝色(#0d47a1)/红色(#b71c1c)，半透明 |
+| 小行星带 | `Points` (1500 粒子) | 硬编码 | innerRadius=45, outerRadius=55, Y≈0 平面，每帧更新轨道角 |
+| 尘埃云 | `Points` (800 粒子) | 硬编码 | radius=70, thickness=25, 球壳分布，缓慢自转 |
+
+### 6.2 地表视角场景（SurfaceView.tsx）
+
+| 对象名 | Three.js 类型 | 数据来源 | 备注 |
+|--------|-------------|----------|------|
+| 天空穹顶 | `Mesh` (SphereGeometry, BackSide) + `ShaderMaterial` | sunDirection/sunAltitude | 昼夜三段过渡着色器（白天→黄昏→黑夜） |
+| 太阳 | `Billboard` + CircleGeometry | sunDirection/altitude | 高度角<−6° 时隐藏，含光晕 3 层 |
+| 星空 | `Points` (3000 粒子) | 随机生成 | opacity 随 sunAltitude 变化（白天淡/夜晚亮） |
+| 星座连线 | `LineSegments` (50 对) | 随机生成 | 可选显示 |
+| 黄道线 | `Line` (100 段) | sunDirection → applyAxisAngle | 绕 `orbitNormal = (0, cosTilt, sinTilt)` 旋转 |
+| 地平线 | `Line` (100 段，Y=0 圆) | 硬编码 | radius=800, Y=0 平面 |
+| 方向标识 | Mesh×4 (Cone/Box/Torus/Sphere) | 硬编码位置 | 北(锥形,-Z)/东(盒子,+X)/南(圆环,+Z)/西(球体,-X) |
+| 天体标记 | `Billboard` + CircleGeometry | 开普勒轨道 → `worldToSkyPosition` | 卫星/外行星，含光晕 + Html 名称标签 |
+| 天体轨迹 | `Line` (80 段) | 模拟采样：太阳年轨迹/卫星周期轨迹/外行星年视运动 | 含相位角和距离衰减 |
+| 行星环弧 | `Mesh`×3 (RingGeometry) | `hasRing` | 地表视角下的环带投影 |
+| 地面 | `Mesh` (PlaneGeometry) + `ShaderMaterial` | 太阳方向 + 贴图采样色 | 昼夜阴影，DepthWrite=false |
+| 大气辉光 | `Mesh`×2 (ConeGeometry + PlaneGeometry) | sunDirection | AdditiveBlending 散射效果 |
+| 相机 | `PerspectiveCamera` (Canvas 内置) | yawRef/pitchRef | 自定义 CameraController 控制旋转 |
+
+### 6.3 详细信息页 3D 场景（DetailPage.tsx — PlanetMesh）
+
+| 对象名 | Three.js 类型 | 数据来源 | 备注 |
+|--------|-------------|----------|------|
+| 行星本体 | `Mesh` (SphereGeometry) + `ShaderMaterial` | customTexture + dayNightShader | 昼夜着色器：sunDot → brightness + 阴影贴图 |
+| 云层 | `Mesh` (SphereGeometry 1.01x) + `ShaderMaterial` | cloudTexture | 晨昏线过渡 + 夜晚半透明 |
+| 大气内层 | `Mesh` (SphereGeometry) + `ShaderMaterial` | atmosphereColor/density | fresnel 效果，BackSide |
+| 大气外层 | `Mesh` (SphereGeometry) + `ShaderMaterial` | 同上 | 叠加 AdditiveBlending |
+| 辉光 | `Mesh` (SphereGeometry) + `ShaderMaterial` | atmosphereOuterRadius | 最外层辉光 |
+| 行星环 | `Mesh`×3 (RingGeometry) + `ShaderMaterial` | ringColor + sunDirection | 实时光照，基于环面方位角计算 brightness |
+| 环粒子 | `Points` | ringParticleCount(500) | 可选单独显示 |
+| 定向光源 | `DirectionalLight` | sunDirection(硬编码) | shadow map 4096×4096 |
+
+### 6.4 特别说明
+
+**行星环旋转方式**：
+- `Planet.tsx:86`：`ringGroupRef` 的 `rotation={[-Math.PI / 2.5, 0, 0]}` — 将水平环面倾斜约 72° 以对齐赤道面
+- 自转时绕 Z 轴旋转（`ringGroupRef.current.children[0].rotation.z`）
+- 此处的旋转约定与 `keplerOrbit.ts` 中轨道面在 X-Z 平面的约定一致
+
+**太阳方向硬编码（DetailPage PlanetMesh）**：
+```ts
+// DetailPage.tsx:416-417 (useFrame)
+const angle = detailPageState.dayTime * Math.PI * 2
+sunRef.current.set(Math.sin(angle), 0, Math.cos(angle))
+```
+太阳方向在 Y=0 平面内旋转（绕 Y 轴），这与主场景中轨道在 X-Z 平面的约定一致。但**未考虑**行星在轨道上的实际位置——太阳始终在一个固定的圆形轨道上。这是一个简化。
+
+---
+
+## 7. 状态流与数据流分析
+
+### 7.1 主场景时间 → 太阳位置更新
+
+```
+用户拖动 timeScale 滑块
+    ↓
+Zustand store: timeScale 更新
+    ↓
+Scene.tsx useFrame:
+    timeRef.current += delta * timeScale  [非暂停时]
+    ↓
+遍历 celestialBodies:
+    planet: calculateOrbitalPositionScaled(timeRef.current, orbitalElements, distanceScale, 50)
+    moon:  同上 + parentPos 偏移
+    ↓
+setBodyPositions(newPositions)  ← React state 更新（每帧！）
+    ↓
+Planet.useFrame / Moon.useFrame:
+    groupRef.current.position = body position
+    ↓
+Star 组件（独立于时间流）:
+    PointLight 固定在原点 (0,0,0)
+```
+
+**注意**：主场景的太阳是固定不动的（始终在原点）。行星绕原点公转。因此"太阳相对行星的位置"是通过行星位置的反方向隐式体现的，但主场景中**没有**根据行星位置动态调整光照方向。
+
+### 7.2 详情页时间 → 场景更新
+
+```
+setInterval(16ms) 或用户拖动滑块
+    ↓
+updateDetailPageState({ globalTime, dayTime, yearTime })
+    ↓
+dayTime 变化 → PlanetMesh.useFrame:
+    sunRef.current = (sin(dayTime*2π), 0, cos(dayTime*2π))
+    → 更新所有 ShaderMaterial uniforms (sunDirection)
+    → 更新行星自转 rotation.y
+    → 更新云层/环旋转
+
+globalTime 变化 → SurfaceViewScene:
+    → 计算行星世界坐标
+    → worldToSkyPosition(太阳) → sunDirection/sunAltitude
+    → 更新 SkyDome/StarField/Ground/CelestialMarkers/Trajectories
+```
+
+### 7.3 用户交互 → Three.js 对象更新
+
+```
+ControlPanel:
+    滑块/按钮 → zustand setXxx() → Store 更新
+    ↓ (以下为响应式)
+Scene useFrame: 读取 timeScale/isPaused/showOrbits 等
+Planet/Moon: 读取 distanceScale/sizeScale
+Star: 读取 brightness/lightIntensity/starGlow
+InfoPanel: 读取 selectedBody → 显示/编辑
+...
+
+DetailPage (行星细节页):
+    设置面板滑块 → updateDetailPageState()
+    → PlanetMesh useMemo/useFrame 自动响应
+    → SurfaceView props 变化 → 重渲染
+```
+
+### 7.4 useFrame 使用分析
+
+| 组件 | useFrame 中做什么 | 性能影响 |
+|------|-------------------|----------|
+| `Scene.tsx` | 累加时间、计算所有天体位置、`setBodyPositions(state)` | **高** — 每帧触发 React state 更新 |
+| `Planet.tsx` | 读取 `bodyPositions`、设置 `groupRef.position`、自转 | 中 |
+| `Moon.tsx` | 同上 | 低 |
+| `AsteroidBelt.tsx` | 更新 1500 个粒子轨道角 | 中高 — 直接修改 BufferGeometry |
+| `DustCloud.tsx` | 整体旋转 | 低 |
+| `DetailPage.PlanetMesh` | 更新 sunDirection + 多种 shader uniforms + 自转 | 中高 |
+| `SurfaceView.CameraController` | 更新相机 fov + rotation | 低 |
+| `SurfaceView.SkyDome` | 更新 shader uniforms | 低 |
+| `SurfaceView.Ground` | 更新 shader uniforms | 低 |
+| `SurfaceView.StarField` | 慢速旋转 | 低 |
+
+### 7.5 数据流 ASCII 图
+
+```
+┌─────────────────────────────────────────────────┐
+│                  Zustand Store                    │
+│  ┌──────────┐  ┌────────────┐  ┌──────────────┐ │
+│  │timeScale  │  │celestial   │  │detailPage    │ │
+│  │isPaused   │  │Bodies[]    │  │State         │ │
+│  │showOrbits │  │            │  │ .globalTime  │ │
+│  │distanceSz │  │            │  │ .dayTime     │ │
+│  │sizeScale  │  │            │  │ .axialTilt   │ │
+│  │brightness │  │            │  │ .surfaceObs  │ │
+│  └────┬─────┘  └─────┬──────┘  └──────┬───────┘ │
+└───────┼──────────────┼────────────────┼─────────┘
+        │              │                │
+        ▼              ▼                ▼
+   ┌─────────┐   ┌──────────┐   ┌──────────────┐
+   │ Scene   │   │ Planet   │   │ DetailPage   │
+   │ useFrame│   │ Star     │   │  ┌─────────┐ │
+   │  ↓      │   │ Moon     │   │  │Planet   │ │
+   │bodyPos  │   │ Orbit    │   │  │Mesh     │ │
+   │(state)  │   │ Asteroid │   │  ├─────────┤ │
+   └─────────┘   └──────────┘   │  │Surface  │ │
+                                 │  │View     │ │
+                                 │  ├─────────┤ │
+                                 │  │MapPanel │ │
+                                 │  └─────────┘ │
+                                 └──────────────┘
+```
+
+---
+
+## 8. 矛盾点与风险标记
+
+### 8.1  高危 — 两套独立时间系统
+
+主场景使用 `timeRef.current`（帧累加秒数），详情页使用 `detailPageState.globalTime`（setInterval 累加秒数）。两者**完全独立、互不关联、初始值均为 0 但累积速率不同**。这意味着：
+- 主场景的天体位置（行星公转）与详情页的太阳位置/昼夜循环**不同步**
+- 无法从主场景的某个时刻「延续」到详情页的同一时刻
+- **天文模型集成时必须统一为单一时间源**
+
+### 8.2  高危 — Scene.tsx 每帧 setState
+
+`Scene.tsx:69`：
+```ts
+setBodyPositions(newPositions)  // 每帧都在更新 React state！
+```
+这会导致每帧触发 React 重新渲染整个 Scene 子树。虽然 R3F 有一定的优化（引用比较），但这仍然是反模式。**建议将 bodyPositions 改为 ref 或使用 R3F 的 `useFrame` 直接操作 Three.js 对象**。
+
+### 8.3 🟡 中危 — 坐标方向标记不一致
+
+`SurfaceView.tsx` 的 DirectionMarkers 将 -Z 标记为"北"，但 `worldToSkyPosition()` 中数学上 +Y 才是北极方向。DirectionMarkers 是简化的地平 UI，与天文北的定义冲突。**天文模型集成时需明确区分"地平坐标系的北"和"世界坐标系的北极方向"**。
+
+### 8.4 🟡 中危 — 详情页太阳方向简化
+
+`DetailPage.tsx PlanetMesh:416-417`：
+```ts
+const angle = detailPageState.dayTime * Math.PI * 2
+sunRef.current.set(Math.sin(angle), 0, Math.cos(angle))
+```
+太阳方向始终在 Y=0 平面内旋转，未考虑：
+- 行星轴倾角（axialTilt）对太阳视位置的影响
+- 行星在椭圆轨道上的位置（太阳距离变化）
+- **天体在不同纬度看到的太阳高度角差异**
+
+而 `SurfaceView.tsx` 使用 `worldToSkyPosition()` 做了完整的轨道→地表投影计算。**同一项目的两个视图使用不同的太阳位置算法**。
+
+### 8.5 🟡 中危 — 经纬度 → 世界坐标的叉积顺序
+
+`surfaceCoords.ts:193-205`：
+```ts
+const rotationAxis = new THREE.Vector3(0, cosTilt, sinTilt);
+let east = new THREE.Vector3().crossVectors(rotationAxis, up).normalize();
+const north = new THREE.Vector3().crossVectors(up, east).normalize();
+```
+
+这是标准的右手术：east = rotationAxis × up, north = up × east。但在极点退化处理中：
+```ts
+if (east.length() < 0.001) {
+  east = new THREE.Vector3(1, 0, 0);  // 硬编码 +X 为东
+  // ...
+}
+```
+
+极点附近 east 退化时硬编码为 (1,0,0)，此假设在轴倾角≠0 时可能不精确。
+
+### 8.6 🟡 中危 — 单位混用
+
+| 参数 | 单位 | 使用位置 |
+|------|------|----------|
+| `dayTime` | 0~1（无单位比例） | DetailPage, SurfaceView |
+| `globalTime` | 秒 | DetailPage, SurfaceView |
+| `timeRef.current` | 秒 | Scene.tsx |
+| `basePeriod` | 抽象（50/30） | keplerOrbit |
+| `axisTilt` | 弧度 | store, 所有组件 |
+| `latitude/longitude` | 弧度 | SurfaceObservationState |
+| `rotationSpeed` | 抽象 | CelestialBody |
+| `orbitSpeed` | 抽象（*0.1） | Scene.tsx 降级路径 |
+
+`calculateOrbitalPeriod` 的 `basePeriod` 为 50（行星）或 30（卫星），这是自定义缩放因子，不是基于物理单位的周期。与 `orbitalPeriodDays`（426.15 天等）字段并存但**未被轨道计算函数使用**。
+
+### 8.7 🟢 低危 — 角度与弧度
+
+代码整体使用弧度，但 `MapPanel.tsx` 在 UI 交互中使用度数并在回调时转换为弧度。InfoPanel 编辑界面中也进行度/弧度转换。整体一致，无明显混用。
+
+### 8.8 🟢 低危 — 硬编码常量散落
+
+| 常量 | 出现位置 |
+|------|----------|
+| `DAY_IN_SECONDS = 24.15 * 3600` | DetailPage.tsx, SurfaceView.tsx（重复定义 3 次） |
+| `YEAR_IN_DAYS = 426.15` | DetailPage.tsx, SurfaceView.tsx（重复定义 2 次） |
+| `YEAR_IN_SECONDS` | DetailPage.tsx, SurfaceView.tsx（分别计算） |
+| `basePeriod = 50 / 30` | Scene.tsx, keplerOrbit.ts |
+| `axialTilt = 0.33 / 0.41` | store, calendar.ts, DetailPage, SurfaceView（多值并存） |
+| `radius = 2.0` (宜居行星) | store（默认值） |
+| 行星环内外半径 1.4r-2.4r | Planet.tsx, DetailPage.tsx |
+| 星空 count = 8000/5000/3000 | App.tsx, DetailPage.tsx, SurfaceView.tsx |
+| `twilightZone = 5°` | MapPanel.tsx |
+| `nightThreshold = -0.105 (6°)` | SurfaceView.tsx |
+
+### 8.9 🟢 低危 — 纬度为 0 时 DirectionMarkers 的验证
+
+DirectionMarkers 的位置在 Y=50（非 Y=0 平面），这使它们在极地纬度也能看到，但方向指示的准确性在非赤道纬度处会偏移。这是 UI 层面的简化。
+
+---
+
+## 9. 附件：关键代码片段
+
+### 9.1 时间更新 Hook（主场景）
+
+```ts
+// Scene.tsx:23-29
+const timeRef = useRef(0)
+
+useFrame((state, delta) => {
+  if (!isPaused) {
+    timeRef.current += delta * timeScale
+  }
+  // ... 计算所有天体位置 ...
+  setBodyPositions(newPositions)  // ← React state 每帧更新
+})
+```
+
+### 9.2 时间更新（详情页）
+
+```ts
+// DetailPage.tsx:763-772
+useEffect(() => {
+  if (isPaused || dayNightRef.current.speed === 0) return
+  const interval = setInterval(() => {
+    const newGlobalTime = dayNightRef.current.globalTime
+      + dayNightRef.current.speed * 0.01 * DAY_IN_SECONDS
+    updateDetailPageState({
+      globalTime: newGlobalTime,
+      dayTime: (newGlobalTime / DAY_IN_SECONDS) % 1,
+      yearTime: (newGlobalTime / YEAR_IN_SECONDS) % 1
+    })
+  }, 16)
+  return () => clearInterval(interval)
+}, [isPaused, updateDetailPageState])
+```
+
+### 9.3 现有轨道位置计算
+
+```ts
+// keplerOrbit.ts:85-105
+export function calculateOrbitalPosition(
+  time: number,
+  elements: OrbitalElements,
+  basePeriod: number = 1
+): { x: number; y: number; z: number } {
+  const period = calculateOrbitalPeriod(elements.semiMajorAxis) * basePeriod
+  const meanAnomaly = (elements.meanAnomaly + (2 * Math.PI * time) / period) % (2 * Math.PI)
+  const eccentricAnomaly = solveKeplerEquation(meanAnomaly, elements.eccentricity)
+  const trueAnomaly = 2 * Math.atan2(
+    Math.sqrt(1 + elements.eccentricity) * Math.sin(eccentricAnomaly / 2),
+    Math.sqrt(1 - elements.eccentricity) * Math.cos(eccentricAnomaly / 2)
+  )
+  return convertOrbitalToCartesian(trueAnomaly, elements)
+}
+```
+
+### 9.4 轨道坐标 → 三维空间
+
+```ts
+// keplerOrbit.ts:51-80 (convertOrbitalToCartesian)
+// 轨道平面内的坐标
+const xOrbit = r * Math.cos(trueAnomaly)
+const zOrbit = r * Math.sin(trueAnomaly)  // X-Z 平面
+
+// 旋转到三维空间（欧拉角变换 Ω, ω, i）
+const x = xOrbit * (cosΩ*cosω - sinΩ*sinω*cosi)
+        - zOrbit * (cosΩ*sinω + sinΩ*cosω*cosi)
+const z = xOrbit * (sinΩ*cosω + cosΩ*sinω*cosi)
+        - zOrbit * (sinΩ*sinω - cosΩ*cosω*cosi)
+const y = xOrbit * sinω*sini + zOrbit * cosω*sini
+```
+
+### 9.5 经纬度 → 世界坐标（完整链路）
+
+```ts
+// surfaceCoords.ts:135-222 (worldToSkyPosition — 核心 88 行)
+// 第1步：局部坐标
+const localX = planetRadius * cosLat * sinLon   // 东西
+const localY = planetRadius * sinLat              // 南北/极轴
+const localZ = planetRadius * cosLat * cosLon    // 前后
+
+// 第2步：自转 + 轴倾角
+const rotX = localX*cosRot + localZ*sinRot
+const rotY = localY
+const rotZ = -localX*sinRot + localZ*cosRot
+// 绕 X 轴应用轴倾角
+const worldY = rotY*cosTilt - rotZ*sinTilt
+const worldZ = rotY*sinTilt + rotZ*cosTilt
+
+// 第3步：观测点世界坐标 = 行星中心 + 表面偏移
+const surfacePos = new THREE.Vector3(
+  planetCenterPos.x + rotX,
+  planetCenterPos.y + worldY,
+  planetCenterPos.z + worldZ
+)
+
+// 第4步：构建 ENU 局部坐标系
+const up = normalize(surfaceOffset)  // 天顶
+const east = normalize(rotationAxis × up)
+const north = normalize(up × east)   // 右手术
+
+// 第5-6步：方向投影 → 高度角/方位角
+```
+
+### 9.6 相机初始化与控制器
+
+```ts
+// App.tsx:112,136-144 (主场景)
+const cameraPosition = useMemo(() =>
+  [0, 30 * distanceScale, 50 * distanceScale], [distanceScale])
+
+<Canvas camera={{ position: cameraPosition, fov: 60 }}
+  gl={{ antialias: true, powerPreference: "high-performance" }} shadows>
+  <OrbitControls enableDamping dampingFactor={0.05}
+    minDistance={5*sizeScale} maxDistance={200*distanceScale} />
+</Canvas>
+
+// DetailPage.tsx:959-971 (详情页轨道视角)
+<Canvas camera={{ position: [0, 0, 6], fov: 60 }} shadows>
+  <OrbitControls enableDamping minDistance={3} maxDistance={20} />
+</Canvas>
+
+// SurfaceView.tsx:1244-1251 (地表视角)
+<Canvas camera={{ position: [0, 0.1, 0], fov, near: 0.01, far: 2000 }}>
+  <CameraController fov={fov} yawRef={yawRef} pitchRef={pitchRef} />
+</Canvas>
+```
+
+### 9.7 观察点选择事件
+
+```ts
+// MapPanel.tsx:384-401
+const handleMapClick = (e: React.MouseEvent<HTMLDivElement>) => {
+  const img = imgRef.current
+  const rect = img.getBoundingClientRect()
+  const x = e.clientX - rect.left
+  const y = e.clientY - rect.top
+  const lonDeg = (x / imgWidth) * 360 - 180
+  const latDeg = 90 - (y / imgHeight) * 180
+  setMarker({ x, y })
+  onSelectPoint?.(latDeg * Math.PI / 180, lonDeg * Math.PI / 180)
+}
+```
+
+### 9.8 降级太阳位置（Scene.tsx 简化路径）
+
+```ts
+// Scene.tsx:44-47
+const angle = timeRef.current * planet.orbitSpeed * 0.1
+const x = Math.cos(angle) * planet.distance * distanceScale
+const z = Math.sin(angle) * planet.distance * distanceScale
+newPositions[planet.id] = new THREE.Vector3(x, 0, z)
+```
+
+### 9.9 太阳方向简化（DetailPage PlanetMesh）
+
+```ts
+// DetailPage.tsx:416-417 (useFrame 中)
+const angle = detailPageState.dayTime * Math.PI * 2
+sunRef.current.set(Math.sin(angle), 0, Math.cos(angle))
+```
+
+---
+
+## 10. 总结：天文模型集成就绪度评估
+
+| 评估维度 | 就绪度 | 说明 |
+|----------|--------|------|
+| 坐标系 | **中等** | 已有明确的 X-Z 轨道面 + Y 极轴约定，但 DirectionMarkers 存在方向标识不一致 |
+| 时间系统 | **低** | 两套独立时间系统需统一为单一时间源（建议统一到 `globalTime` + 儒略日映射） |
+| 轨道计算 | **高** | `keplerOrbit.ts` 实现了完整的开普勒轨道求解（牛顿迭代 + 欧拉角旋转），可直接对接 v3.1 模型 |
+| 地表天象 | **高** | `worldToSkyPosition()` 实现了完整的天体→天空投影（含轴倾角+自转+大气折射），与 v3.1 模型需求高度吻合 |
+| 渲染管线 | **高** | R3F + ShaderMaterial 架构灵活，新天文对象可独立组件注入 |
+| 状态管理 | **中** | Zustand 单 store 足够灵活，但需清理重复常量（DAY_IN_SECONDS 等 3 处定义） |
+| 观察点系统 | **中** | 经纬度数据完备，缺乏海拔和过渡动画 |
+| 代码质量 | **中** | Scene.tsx 每帧 setState 需重构；多点硬编码常量需提取 |
+
+**最关键的集成步骤建议**：
+1. **统一时间系统**：废弃 Scene.tsx 的 `timeRef`，全部使用 `detailPageState.globalTime`
+2. **定义时间映射**：`globalTime` → 儒略日 T = `globalTime / 86400 + J2000_EPOCH`
+3. **统一太阳位置计算**：详情页 PlanetMesh 的太阳方向应从轨道反算（`-planetWorldPos.normalize()`），而非简化的 `(sin, 0, cos)`
+4. **清理 DirectionMarkers**：将方向标识与 `worldToSkyPosition` 的 ENU 框架对齐
+5. **重构 Scene.tsx**：用 ref 替代 state 存储天体位置，避免每帧 React 重渲染

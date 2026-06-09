@@ -14,6 +14,7 @@ interface DustCloudProps {
 function DustCloud({ radius, thickness, count, color = '#6677aa', opacity = 0.08 }: DustCloudProps) {
   const meshRef = useRef<THREE.Points>(null)
   const { distanceScale } = useStore()
+  const T = useStore(s => s.timeSystem.T)
 
   const { positions, colors, sizes, phases } = useMemo(() => {
     const positions = new Float32Array(count * 3)
@@ -46,11 +47,10 @@ function DustCloud({ radius, thickness, count, color = '#6677aa', opacity = 0.08
 
   const geometryRef = useRef<THREE.BufferGeometry>(null)
 
-  useFrame((_) => {
+  useFrame(() => {
     if (!meshRef.current || !geometryRef.current) return
     
-    const time = _
-    meshRef.current.rotation.y += 0.0005
+    meshRef.current.rotation.y = T * 0.05
   })
 
   return (

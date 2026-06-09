@@ -6,6 +6,9 @@ import { setHash } from '../utils/router'
 
 // 时间系统默认参数（来自设定文件）
 const defaultTimeSystem: TimeSystem = {
+  T: 0,
+  timeScale: 1,
+  isPaused: false,
   localDayHours: 24.15,
   localYearDays: 426.15,
   localMonthDays: 42.0,
@@ -212,8 +215,6 @@ const defaultDetailPageState: DetailPageState = {
 
 export const useStore = create<StoreState & { celestialBodies: CelestialBody[], detailPageState: DetailPageState }>((set) => ({
   celestialBodies: defaultCelestialBodies,
-  timeScale: 1,
-  isPaused: false,
   showOrbits: true,
   selectedBody: null,
   focusBody: null,
@@ -237,8 +238,6 @@ export const useStore = create<StoreState & { celestialBodies: CelestialBody[], 
   timeSystem: defaultTimeSystem,
   calendarSystem: defaultCalendarSystem,
 
-  setTimeScale: (scale) => set({ timeScale: scale }),
-  togglePause: () => set((state) => ({ isPaused: !state.isPaused })),
   toggleOrbits: () => set((state) => ({ showOrbits: !state.showOrbits })),
   selectBody: (body) => set({ selectedBody: body }),
   setFocusBody: (body) => set({ focusBody: body }),
@@ -311,6 +310,7 @@ export const useStore = create<StoreState & { celestialBodies: CelestialBody[], 
       : state.focusBody,
   })),
 
+  // 统一时间系统更新（包含T、timeScale、isPaused及UI参数）
   updateTimeSystem: (updates: Partial<TimeSystem>) => set((state) => ({
     timeSystem: { ...state.timeSystem, ...updates }
   })),

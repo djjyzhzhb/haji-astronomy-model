@@ -8,10 +8,9 @@ import { calculateOrbitalPositionScaled } from '../utils/keplerOrbit'
 
 interface MoonProps {
   body: CelestialBody
-  timeRef: React.MutableRefObject<number>
 }
 
-function Moon({ body, timeRef }: MoonProps) {
+function Moon({ body }: MoonProps) {
   const meshRef = useRef<THREE.Mesh>(null)
   const groupRef = useRef<THREE.Group>(null)
   const tiltGroupRef = useRef<THREE.Group>(null)
@@ -28,19 +27,19 @@ function Moon({ body, timeRef }: MoonProps) {
 
   useFrame(() => {
     if (groupRef.current && body.orbitalElements) {
-      const pos = calculateOrbitalPositionScaled(timeRef.current, body.orbitalElements, distanceScale, 30)
+      const pos = calculateOrbitalPositionScaled(useStore.getState().timeSystem.T, body.orbitalElements, distanceScale, 30)
       groupRef.current.position.set(pos.x, pos.y, pos.z)
     } else if (groupRef.current && body.distance && body.orbitSpeed) {
-      const angle = timeRef.current * body.orbitSpeed * 0.1
+      const angle = useStore.getState().timeSystem.T * body.orbitSpeed * 0.1
       groupRef.current.position.x = Math.cos(angle) * body.distance * distanceScale
       groupRef.current.position.z = Math.sin(angle) * body.distance * distanceScale
     }
     
     // 使用时间差来更新自转，这样就和时间缩放同步了
     if (meshRef.current && body.rotationSpeed) {
-      const delta = timeRef.current - previousTime.current
+      const delta = useStore.getState().timeSystem.T - previousTime.current
       meshRef.current.rotation.y += body.rotationSpeed * delta
-      previousTime.current = timeRef.current
+      previousTime.current = useStore.getState().timeSystem.T
     }
   })
 

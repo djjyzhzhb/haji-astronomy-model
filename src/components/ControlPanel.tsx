@@ -4,12 +4,12 @@ import { useStore } from '../store'
 
 function ControlPanel() {
   const { 
-    timeScale, isPaused, showOrbits, focusBody, brightness, 
+    timeSystem, showOrbits, focusBody, brightness, 
     backgroundBrightness, backgroundColor, showNebula,
     distanceScale, sizeScale, lightIntensity, ambientLight, starGlow,
     showAtmosphere, showRings, showAsteroids, showDustCloud, showShadows,
     celestialBodies,
-    setTimeScale, togglePause, toggleOrbits, setFocusBody, 
+    updateTimeSystem, toggleOrbits, setFocusBody, 
     setBrightness, setBackgroundBrightness, setBackgroundColor, setShowNebula,
     setDistanceScale, setSizeScale, setLightIntensity, setAmbientLight, setStarGlow,
     setShowAtmosphere, setShowRings, setShowAsteroids, setShowDustCloud, setShowShadows
@@ -24,14 +24,14 @@ function ControlPanel() {
   ]
 
   const adjustTimeScale = (delta: number) => {
-    setTimeScale(Math.max(0.1, Math.min(100, timeScale + delta)))
+    updateTimeSystem({ timeScale: Math.max(0.1, Math.min(100, timeSystem.timeScale + delta)) })
   }
 
   return (
     <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
       {expanded && (
-        <div className="mb-2 bg-gray-900/95 backdrop-blur-sm rounded-xl border border-gray-700/50 p-3 min-w-0 w-[400px] landscape-mobile:w-[calc(100vw-1rem)] landscape-mobile:p-2">
-          <div className="grid grid-cols-2 gap-3 landscape-mobile:gap-1.5">
+        <div className="mb-2 bg-gray-900/95 backdrop-blur-sm rounded-xl border border-gray-700/50 p-3 min-w-0 w-[400px] max-md:w-[calc(100vw-1rem)] max-md:p-2">
+          <div className="grid grid-cols-2 gap-3 max-md:gap-1.5">
             <div className="space-y-2">
               <div className="flex items-center gap-2 text-xs text-gray-400">
                 <Maximize2 size={12} />
@@ -104,8 +104,8 @@ function ControlPanel() {
       )}
 
       {visualExpanded && (
-        <div className="mb-2 bg-gray-900/95 backdrop-blur-sm rounded-xl border border-gray-700/50 p-3 min-w-0 w-[400px] landscape-mobile:w-[calc(100vw-1rem)] landscape-mobile:p-2">
-          <div className="grid grid-cols-2 gap-3 landscape-mobile:gap-1.5">
+        <div className="mb-2 bg-gray-900/95 backdrop-blur-sm rounded-xl border border-gray-700/50 p-3 min-w-0 w-[400px] max-md:w-[calc(100vw-1rem)] max-md:p-2">
+          <div className="grid grid-cols-2 gap-3 max-md:gap-1.5">
             <div className="space-y-2">
               <div className="flex items-center gap-2 text-xs text-gray-400">
                 <Zap size={12} />
@@ -201,13 +201,13 @@ function ControlPanel() {
         </div>
       )}
 
-      <div className="bg-gray-900/95 backdrop-blur-sm rounded-xl border border-gray-700/50 p-2 flex items-center gap-2 landscape-mobile:gap-1 landscape-mobile:px-1 landscape-mobile:py-1">
+      <div className="bg-gray-900/95 backdrop-blur-sm rounded-xl border border-gray-700/50 p-2 flex items-center gap-2 max-md:gap-1 max-md:px-1 max-md:py-1">
         <button
-          onClick={togglePause}
+          onClick={() => updateTimeSystem({ isPaused: !timeSystem.isPaused })}
           className="p-2 hover:bg-gray-700 rounded-lg transition-colors text-white"
-          title={isPaused ? '播放' : '暂停'}
+          title={timeSystem.isPaused ? '播放' : '暂停'}
         >
-          {isPaused ? <Play size={18} /> : <Pause size={18} />}
+          {timeSystem.isPaused ? <Play size={18} /> : <Pause size={18} />}
         </button>
 
         <button
@@ -218,17 +218,17 @@ function ControlPanel() {
           <Rewind size={18} />
         </button>
 
-        <div className="flex items-center gap-1 bg-gray-800/50 rounded-lg px-2 py-1 landscape-mobile:w-12">
+        <div className="flex items-center gap-1 bg-gray-800/50 rounded-lg px-2 py-1 max-md:w-12">
           <input
             type="range"
             min="0.1"
             max="100"
             step="0.1"
-            value={timeScale}
-            onChange={(e) => setTimeScale(parseFloat(e.target.value))}
-            className="w-16 landscape-mobile:w-10 accent-blue-500 h-1.5"
+            value={timeSystem.timeScale}
+            onChange={(e) => updateTimeSystem({ timeScale: parseFloat(e.target.value) })}
+            className="w-16 max-md:w-10 accent-blue-500 h-1.5"
           />
-          <span className="text-white text-xs w-8">{timeScale.toFixed(1)}x</span>
+          <span className="text-white text-xs w-8">{timeSystem.timeScale.toFixed(1)}x</span>
         </div>
 
         <button
@@ -257,7 +257,7 @@ function ControlPanel() {
           <Sparkles size={18} />
         </button>
 
-        <div className="w-px h-6 bg-gray-700 mx-1 landscape-mobile:hidden" />
+        <div className="w-px h-6 bg-gray-700 mx-1 max-md:hidden" />
 
         <select
           value={focusBody?.id || ''}
@@ -265,7 +265,7 @@ function ControlPanel() {
             const body = celestialBodies.find(b => b.id === e.target.value)
             setFocusBody(body || null)
           }}
-          className="bg-gray-800/50 text-white px-2 py-1 rounded-lg text-xs border border-gray-700 focus:border-blue-500 focus:outline-none min-w-[100px] landscape-mobile:hidden"
+          className="bg-gray-800/50 text-white px-2 py-1 rounded-lg text-xs border border-gray-700 focus:border-blue-500 focus:outline-none min-w-[100px] max-md:hidden"
         >
           <option value="">全景</option>
           {celestialBodies.map(body => (
@@ -273,9 +273,9 @@ function ControlPanel() {
           ))}
         </select>
 
-        <div className="w-px h-6 bg-gray-700 mx-1 landscape-mobile:hidden" />
+        <div className="w-px h-6 bg-gray-700 mx-1 max-md:hidden" />
 
-        <div className="flex gap-1 landscape-mobile:hidden">
+        <div className="flex gap-1 max-md:hidden">
           {presets.map((preset) => (
             <button
               key={preset.name}

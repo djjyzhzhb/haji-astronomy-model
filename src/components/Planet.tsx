@@ -11,11 +11,10 @@ import { calculateOrbitalPositionScaled } from '../utils/keplerOrbit'
 
 interface PlanetProps {
   body: CelestialBody
-  timeRef: React.MutableRefObject<number>
   moons: CelestialBody[]
 }
 
-function Planet({ body, timeRef, moons }: PlanetProps) {
+function Planet({ body, moons }: PlanetProps) {
   const meshRef = useRef<THREE.Mesh>(null)
   const groupRef = useRef<THREE.Group>(null)
   const tiltGroupRef = useRef<THREE.Group>(null)
@@ -50,28 +49,35 @@ function Planet({ body, timeRef, moons }: PlanetProps) {
   }, [])
 
   const previousTime = useRef(0)
+  const sunDirectionRef = useRef(new THREE.Vector3())
 
   useFrame(() => {
     if (groupRef.current && body.orbitalElements) {
-      const pos = calculateOrbitalPositionScaled(timeRef.current, body.orbitalElements, distanceScale, 50)
+      const pos = calculateOrbitalPositionScaled(useStore.getState().timeSystem.T, body.orbitalElements, distanceScale, 50)
       groupRef.current.position.set(pos.x, pos.y, pos.z)
     } else if (groupRef.current && body.distance && body.orbitSpeed) {
-      const angle = timeRef.current * body.orbitSpeed * 0.1
+      const angle = useStore.getState().timeSystem.T * body.orbitSpeed * 0.1
       groupRef.current.position.x = Math.cos(angle) * body.distance * distanceScale
       groupRef.current.position.z = Math.sin(angle) * body.distance * distanceScale
+    }
+
+    // 计算太阳方向（恒星在原点，行星位置的反方向指向太阳）
+    if (groupRef.current) {
+      groupRef.current.getWorldPosition(sunDirectionRef.current)
+      sunDirectionRef.current.negate().normalize()
     }
     
     // 使用时间差来更新自转，这样就和时间缩放同步了
     if (meshRef.current && body.rotationSpeed) {
-      const delta = timeRef.current - previousTime.current
+      const delta = useStore.getState().timeSystem.T - previousTime.current
       meshRef.current.rotation.y += body.rotationSpeed * delta
-      previousTime.current = timeRef.current
+      previousTime.current = useStore.getState().timeSystem.T
     }
     
     // 行星环跟着星球自转而旋转
     if (ringGroupRef.current && body.hasRing && showRings) {
       // 环在内部 group 中旋转了，所以我们需要旋转 z 轴而不是 y 轴
-      ringGroupRef.current.children[0].rotation.z += (body.rotationSpeed || 0.01) * (timeRef.current - previousTime.current)
+      ringGroupRef.current.children[0].rotation.z += (body.rotationSpeed || 0.01) * (useStore.getState().timeSystem.T - previousTime.current)
     }
   })
 
@@ -223,7 +229,7 @@ function Planet({ body, timeRef, moons }: PlanetProps) {
             {showOrbits && moon.distance && (
               <Orbit body={moon} />
             )}
-            <Moon body={moon} timeRef={timeRef} />
+            <Moon body={moon} />
           </group>
         ))}
       </group>

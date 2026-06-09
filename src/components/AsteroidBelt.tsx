@@ -13,6 +13,7 @@ interface AsteroidBeltProps {
 function AsteroidBelt({ innerRadius, outerRadius, count, color = '#8b8b8b' }: AsteroidBeltProps) {
   const meshRef = useRef<THREE.Points>(null)
   const { distanceScale } = useStore()
+  const T = useStore(s => s.timeSystem.T)
 
   const { positions, colors, sizes, phases } = useMemo(() => {
     const positions = new Float32Array(count * 3)
@@ -48,7 +49,6 @@ function AsteroidBelt({ innerRadius, outerRadius, count, color = '#8b8b8b' }: As
   useFrame((_, delta) => {
     if (!meshRef.current || !geometryRef.current) return
     
-    const time = _
     const positions = geometryRef.current.attributes.position.array as Float32Array
     
     for (let i = 0; i < count; i++) {

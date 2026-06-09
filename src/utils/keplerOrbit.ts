@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { deterministicHash } from './astronomy'
 
 /**
  * 开普勒轨道计算工具
@@ -11,9 +12,10 @@ export interface OrbitalElements {
   inclination: number        // 倾角 (i)
   longitudeOfAscendingNode: number // 升交点黄经 (Ω)
   argumentOfPeriapsis: number // 近心点幅角 (ω)
-  meanAnomaly: number        // 平近点角 (M0)
+  meanAnomaly: number        // 历元时刻 T=0 的平近点角（弧度）
 }
 
+/** @deprecated 直接使用 CelestialBody.orbitalPeriodDays，不再从半长轴推导周期 */
 /**
  * 计算轨道周期（开普勒第三定律）
  * T² = a³，其中 a 以 AU 为单位，T 以年为单位
@@ -80,6 +82,34 @@ export function convertOrbitalToCartesian(
 }
 
 /**
+ * 基于统一儒略日 T 计算轨道位置（新接口）
+ * @param T 儒略日（本地日，春分正午=0）
+ * @param orbitalPeriodDays 公转周期（本地日）
+ * @param elements 开普勒轨道元素
+ * @returns 三维空间坐标 {x, y, z}
+ */
+export function calculateOrbitalPositionFromT(
+  T: number,
+  orbitalPeriodDays: number,
+  elements: OrbitalElements
+): { x: number; y: number; z: number } {
+  // 平近点角：历元值 + T个周期的角度增量
+  const meanAnomaly = (elements.meanAnomaly + (2 * Math.PI * T) / orbitalPeriodDays) % (2 * Math.PI)
+  
+  // 求解偏近点角
+  const eccentricAnomaly = solveKeplerEquation(meanAnomaly, elements.eccentricity)
+  
+  // 计算真近点角
+  const trueAnomaly = 2 * Math.atan2(
+    Math.sqrt(1 + elements.eccentricity) * Math.sin(eccentricAnomaly / 2),
+    Math.sqrt(1 - elements.eccentricity) * Math.cos(eccentricAnomaly / 2)
+  )
+  
+  // 转换为三维坐标
+  return convertOrbitalToCartesian(trueAnomaly, elements)
+}
+
+/**
  * 计算在给定时间的轨道位置
  */
 export function calculateOrbitalPosition(
@@ -105,23 +135,70 @@ export function calculateOrbitalPosition(
 }
 
 /**
- * 创建简化的轨道参数（用于我们的模型）
+ * 创建简化的开普勒轨道参数（确定性版本）。
+ * 
+ * 与旧版本的区别：使用 `deterministicHash` 替代 `Math.random()`，
+ * 保证相同的 distance/seed 始终产生相同的轨道，使得页面刷新后天体位置一致。
+ *
+ * @param distance      半长轴（抽象单位）
+ * @param eccentricity  偏心率（0 = 正圆）
+ * @param inclination   轨道倾角（弧度）
+ * @param seed          可选的确定性种子字符串（如天体 id），留空则从 distance 推导
  */
-export function createSimpleOrbit(distance: number, eccentricity: number = 0, inclination: number = 0): OrbitalElements {
+export function createSimpleOrbit(
+  distance: number,
+  eccentricity: number = 0,
+  inclination: number = 0,
+  seed?: string
+): OrbitalElements {
+  const seedStr = seed ?? `orbit-${distance}`;
+  const meanAnomaly    = deterministicHash(seedStr, 1) * Math.PI * 2;
+  const argumentPeri   = deterministicHash(seedStr, 2) * Math.PI * 2;
+
   return {
     semiMajorAxis: distance,
     eccentricity,
-    inclination,  // 倾角：相对于 X-Z 平面
-    longitudeOfAscendingNode: 0,  // 升交点黄经设为0，简化
-    argumentOfPeriapsis: Math.random() * Math.PI * 2,  // 近心点位置随机
-    meanAnomaly: Math.random() * Math.PI * 2,  // 初始位置随机
-  }
+    inclination,
+    longitudeOfAscendingNode: 0,
+    argumentOfPeriapsis: argumentPeri,
+    meanAnomaly,
+  };
 }
 
 /**
  * 获取轨道上的点（用于绘制轨道线）
  */
 export function getOrbitPoints(elements: OrbitalElements, segments: number = 128, distanceScale: number = 1): THREE.Vector3[] {
+  const points: THREE.Vector3[] = []
+  
+  for (let i = 0; i <= segments; i++) {
+    const meanAnomaly = (i / segments) * Math.PI * 2
+    const eccentricAnomaly = solveKeplerEquation(meanAnomaly, elements.eccentricity)
+    const trueAnomaly = 2 * Math.atan2(
+      Math.sqrt(1 + elements.eccentricity) * Math.sin(eccentricAnomaly / 2),
+      Math.sqrt(1 - elements.eccentricity) * Math.cos(eccentricAnomaly / 2)
+    )
+    
+    const pos = convertOrbitalToCartesian(trueAnomaly, elements)
+    points.push(new THREE.Vector3(pos.x * distanceScale, pos.y * distanceScale, pos.z * distanceScale))
+  }
+  
+  return points
+}
+
+/**
+ * 获取轨道上的点（用于绘制轨道线，基于T的新接口）
+ * @param orbitalPeriodDays 公转周期（本地日）
+ * @param elements 开普勒轨道元素
+ * @param segments 分段数
+ * @param distanceScale 距离缩放
+ */
+export function getOrbitPointsFromT(
+  orbitalPeriodDays: number,
+  elements: OrbitalElements,
+  segments: number = 128,
+  distanceScale: number = 1
+): THREE.Vector3[] {
   const points: THREE.Vector3[] = []
   
   for (let i = 0; i <= segments; i++) {

@@ -6,10 +6,9 @@ import { useStore } from '../store'
 
 interface StarProps {
   body: CelestialBody
-  timeRef: React.MutableRefObject<number>
 }
 
-function Star({ body, timeRef }: StarProps) {
+function Star({ body }: StarProps) {
   const meshRef = useRef<THREE.Mesh>(null)
   const { selectBody, brightness, sizeScale, distanceScale, lightIntensity, starGlow } = useStore()
 

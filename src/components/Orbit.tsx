@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import * as THREE from 'three'
 import { CelestialBody } from '../types'
-import { getOrbitPoints } from '../utils/keplerOrbit'
+import { getOrbitPoints, getOrbitPointsFromT } from '../utils/keplerOrbit'
 import { useStore } from '../store'
 
 interface OrbitProps {
@@ -17,8 +17,13 @@ function Orbit({ body, color = '#ffffff', opacity = 0.3 }: OrbitProps) {
     let pts: number[] = []
     
     if (body.orbitalElements) {
-      const points = getOrbitPoints(body.orbitalElements, 128, distanceScale)
-      pts = points.flatMap(p => [p.x, p.y, p.z])
+      if (body.orbitalPeriodDays) {
+        const points = getOrbitPointsFromT(body.orbitalPeriodDays, body.orbitalElements, 128, distanceScale)
+        pts = points.flatMap(p => [p.x, p.y, p.z])
+      } else {
+        const points = getOrbitPoints(body.orbitalElements, 128, distanceScale)
+        pts = points.flatMap(p => [p.x, p.y, p.z])
+      }
     } else {
       const radius = (body.distance || 10) * distanceScale
       for (let i = 0; i <= 128; i++) {

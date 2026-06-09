@@ -1,5 +1,5 @@
 import { Canvas } from '@react-three/fiber'
-import { Suspense, useRef, useMemo, useEffect } from 'react'
+import { Suspense, useRef, useMemo, useEffect, useState } from 'react'
 import { OrbitControls, Stars } from '@react-three/drei'
 import Scene from './components/Scene'
 import ControlPanel from './components/ControlPanel'
@@ -10,18 +10,26 @@ import { useStore } from './store'
 import { parseHash } from './utils/router'
 import * as THREE from 'three'
 
-// 移动端竖屏旋转提示
-function PortraitRotateHint() {
-  return (
-    <div className="portrait-overlay select-none">
-      <svg className="rotate-icon" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#64a5ff" strokeWidth="2">
-        <rect x="2" y="3" width="20" height="18" rx="2" />
-        <path d="M12 6v12" />
-      </svg>
-      <p className="text-white text-lg font-semibold">请旋转手机</p>
-      <p className="text-gray-400 text-sm">横屏体验更佳</p>
-    </div>
-  )
+// 移动端竖屏检测：宽 < 900px 且竖屏时旋转为横屏
+function useMobilePortrait() {
+  const [isPortrait, setIsPortrait] = useState(false)
+
+  useEffect(() => {
+    const check = () => {
+      const w = window.innerWidth
+      const h = window.innerHeight
+      setIsPortrait(w < 900 && h > w)
+    }
+    check()
+    window.addEventListener('resize', check)
+    window.addEventListener('orientationchange', check)
+    return () => {
+      window.removeEventListener('resize', check)
+      window.removeEventListener('orientationchange', check)
+    }
+  }, [])
+
+  return isPortrait
 }
 
 function SceneWrapper() {
@@ -102,6 +110,15 @@ function NebulaEffect({ brightness, distanceScale }: { brightness: number; dista
 function App() {
   const { selectedBody, backgroundColor, distanceScale, currentPage, navigateToDetail } = useStore()
   const cameraPosition = useMemo(() => [0, 30 * distanceScale, 50 * distanceScale], [distanceScale])
+  const isMobilePortrait = useMobilePortrait()
+
+  useEffect(() => {
+    // 根据竖屏状态切换 root 的 CSS 类
+    const root = document.getElementById('root')
+    if (root) {
+      root.classList.toggle('mobile-portrait', isMobilePortrait)
+    }
+  }, [isMobilePortrait])
 
   useEffect(() => {
     const route = parseHash()
@@ -111,17 +128,11 @@ function App() {
   }, [navigateToDetail])
 
   if (currentPage === 'detail') {
-    return (
-      <>
-        <PortraitRotateHint />
-        <DetailPage />
-      </>
-    )
+    return <DetailPage />
   }
 
   return (
     <div className="w-full h-full relative" style={{ backgroundColor }}>
-      <PortraitRotateHint />
       <Canvas
         key={distanceScale}
         camera={{ position: cameraPosition as [number, number, number], fov: 60 }}
@@ -137,19 +148,16 @@ function App() {
       </Canvas>
       
       <ControlPanel />
-      {/* 性能监控面板在右边 */}
       <div className="absolute top-4 right-4 z-20">
         <PerformanceMonitor />
       </div>
 
-      {/* 信息面板在左边 */}
       {selectedBody && (
         <div className="absolute top-4 left-4 z-10 max-md:fixed max-md:top-14 max-md:left-1/2 max-md:-translate-x-1/2 max-md:z-50 max-md:w-[92vw]">
           <InfoPanel />
         </div>
       )}
 
-      {/* 标题在右边，移动端隐藏 */}
       <div className="absolute top-4 right-4 max-md:hidden text-white pointer-events-none">
         <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
           天文模型

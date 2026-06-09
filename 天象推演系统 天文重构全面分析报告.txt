@@ -1,0 +1,562 @@
+天象推演系统 天文重构全面分析报告
+
+目的：为 AI 编程助手提供每一项修改的 科学依据、数学推导与工程理由，使其理解“为什么必须改”“不改会导致什么错误”，从而在代码生成中做出正确判断。
+涵盖范围：时间系统、太阳视位置、坐标转换、历法、渲染性能、常量管理。
+附注：所有建议均基于已确认的项目审计报告与 v3.1 球面天文模型，不添加任何未经讨论的新功能。
+
+---
+
+一、时间系统：为什么必须统一为单一儒略日 T？
+
+1.1 现状问题
+
+· 主场景 timeRef.current 自增帧秒数，详情页 globalTime 由独立 setInterval 累加。二者无任何关联，导致太空行星位置与地表太阳位置永久不同步。
+· 无纪元定义，T=0 时刻的物理意义缺失，无法验证春分点、历法起点。
+
+1.2 科学依据
+
+天文学中，所有天体位置计算依赖于一个 连续、均匀的时间变量（如儒略日）。IAU 2000 框架要求时间系统必须与地球时（TT）或质心力学时（TDB）关联。在我们的模型里，儒略日 T 以本初子午线春分日正午 12:00 为零点，这是因为：
+
+· 此时真太阳（忽略光行差）的 视黄经 λ_⊙ = 0，处于春分点（天赤道与黄道升交点）。
+· 格林尼治平恒星时（GMST）的基准时刻通常取春分点上中天时刻，这里通过 T=0 直接设定正午，简化了 GMST 的零点偏移。
+
+若使用两套独立时间，则无法保证：
+
+· 行星公转角度与太阳黄经的耦合（它们应遵循相同的 T）。
+· 环食发生时（太阳黄经 0° 或 180°）太空视角中行星的位置正确对齐。
+
+1.3 统一方案推导
+
+定义单一状态：T ∈ ℝ（单位：本地日）。所有运动由 T 驱动。
+
+· 行星轨道：平近点角 M = M₀ + 2πT / P_orb，其中 P_orb 是公转周期（本地日）。
+· 太阳黄经：L₀ = 2πT / D_⊙（回归年），因为回归年定义为太阳两次过春分点的时间，T=0 时春分，故 L₀=0。
+· 地方恒星时：GMST = 2π (T / d_s) mod 2π，LST = GMST + λ。
+
+如果使用两个不同时间源，上述三个物理量会出现不一致：例如太阳在春分点，行星却不在对应轨道位置。
+
+1.4 工程理由
+
+· 代码维护性：一个全局时间源，所有组件通过 store 读取，避免多个计时器竞争。
+· 可复现性：给定 T，整个系统的天文状态完全确定，便于测试和调试。
+
+结论：必须废弃 timeRef 和 globalTime，全部迁移到 store.timeSystem.T。初始值设 0，从春分正午开始。
+
+---
+
+二、太阳视位置计算：为什么必须引入平黄经、中心差、章动、光行差？
+
+2.1 现状错误
+
+· 主场景：太阳固定原点，行星绕行，太阳方向由行星位置反推，但光照不动态更新。
+· 详情页 PlanetMesh：太阳方向硬编码 (sin(angle), 0, cos(angle))，仅表示 Y=0 平面内的均匀圆周运动。
+· SurfaceView：calculateSunSkyPosition 基于 yearProgress 简单余弦求太阳赤纬，未经黄道坐标转换。
+
+这些简化忽略了轨道偏心率、轴倾角、章动、光行差，导致：
+
+· 太阳黄经与实际季节（太阳赤纬）的相位关系错误（中心差可达 1.9°）。
+· 在极地地区，太阳高度角误差显著。
+· 无法正确判断春分、夏至等节气。
+
+2.2 天文学基础
+
+从地心（或行星心）看，太阳的视运动可分解为 黄经 和 黄纬（后者≈0）。黄经由三部分组成：
+
+· 平黄经 L₀：假设圆轨道、匀速。
+· 中心差 C：椭圆轨道修正，C ≈ 2e sin M + (5/4)e² sin 2M（布朗级数展开）。
+· 章动 Δψ：地球自转轴的短周期摆动导致春分点的小幅移动，周期约 18.6 年（真实地球值）。
+· 光行差 Δa：由于观测者（行星）运动，光速有限导致星体视位置偏移，常数约 20.5″（地球值）。
+
+岁差 是春分点长期西移，但若时间变量使用 回归年 计数，则平黄经 L₀ 已自动追踪移动春分点，因此 不再累加岁差项，否则会导致长期漂移。
+
+真黄赤交角 ε' 也受章动影响：ε' = ε + Δε，其中 Δε 是交角章动项。
+
+将视黄经和真交角代入黄道→赤道转换，得到太阳赤经、赤纬。
+
+2.3 三级精度的数学依据
+
+精度 公式 忽略项 适用场景
+低精度 λ = L₀ e, Δψ, Δa 神话叙事、UI 背景
+中精度 λ = L₀ + C Δψ, Δa 民用历法、游戏
+高精度 λ = L₀ + C + Δψ - Δa 章动多频项等 天文模拟、科学可视化
+
+中心差公式是开普勒方程的小偏心率近似，适用于 e < 0.1。章动单一项采用主项，振幅 9.2″，足以达到 <0.001° 的短期精度。
+
+2.4 为什么不能用 dayTime 线性映射？
+
+dayTime 是一个 0~1 的比例值（假定全球统一平太阳时），用它乘以 2π 得到的角度是 平太阳时角，不是太阳黄经。太阳黄经需要回归年进度 + 修正，而时角需要从赤经、LST 计算。直接线性映射会导致：
+
+· 太阳在春分日的高度角在天亮后的变化曲线不对称（真太阳时与平太阳时偏差）。
+· 不同经度的日出日落时间不准确。
+· 无法实现高精度天文现象（如环食）。
+
+2.5 工程影响
+
+· 将太阳位置计算封装为纯函数 sunEclipticHigh 等，利于测试和替换精度等级。
+· 所有太阳方向依赖的着色器、地面阴影、天体标记均需改为调用这些函数，移除硬编码。
+
+结论：必须实现三级精度太阳黄经，并由此产生太阳赤道坐标，再结合 LST 和纬度得到高度角/方位角。所有硬编码太阳方向必须删除。
+
+---
+
+三、坐标转换：为什么必须建立黄道→赤道→地平完整链路？
+
+3.1 当前缺陷
+
+· 缺乏黄道→赤道转换函数，地表视图直接从世界坐标推算，未使用天球坐标系。
+· 方位角符号错误（缺少负号），导致东西镜像。
+· DirectionMarkers 将世界坐标 -Z 标为“北”，但实际天文北由 ENU 局部坐标系的 north 向量决定，二者在非赤道位置产生偏差。
+· 行星环放置：rotation={[-π/2.5, 0, 0]} 是粗糙近似，应精确位于赤道面（与天极轴垂直）。
+
+3.2 球面天文原理
+
+基本流程：
+
+1. 黄道坐标 (λ, β) → 赤道坐标 (α, δ)，通过旋转矩阵（绕春分点与天极的轴旋转 ε' 角）。公式：
+   ```
+   sin δ = sin β cos ε' + cos β sin ε' sin λ
+   cos α cos δ = cos β cos λ
+   sin α cos δ = cos β sin λ cos ε' - sin β sin ε'
+   ```
+   对于太阳 β=0，简化为：
+   ```
+   sin δ = sin ε' sin λ
+   α = atan2(sin λ cos ε', cos λ)
+   ```
+2. 赤道坐标 (α, δ) → 地平坐标 (h, A)，通过观测者纬度 φ 和时角 t = LST - α：
+   ```
+   sin h = sin φ sin δ + cos φ cos δ cos t
+   cos A cos h = -sin φ cos δ cos t + cos φ sin δ
+   sin A cos h = -cos δ sin t   ← 负号必须，推导见下
+   ```
+
+3.3 方位角负号推导
+
+时角 t 定义为向西为正（天球自东向西旋转）。在赤道 (φ=0) 且天体赤纬 δ=0 时，若时角 t = 90°（天体在正西方向地平线），则应有 A = 270°（西）。代入 sin A cos h = -cos δ sin t：
+
+· cos h = cos 0 = 1
+· sin A = -1 × 1 = -1 → A = 270° 或 -90°（使用 atan2 得到 270°），正确。
+  若用 +cos δ sin t，则 sin A = +1 → A = 90°（东），东西完全颠倒。
+
+3.4 为什么 DirectionMarkers 用 -Z 是错的？
+
+在 ENU 坐标系中：
+
+· up = 从行星中心指向观测点的单位向量（天顶）。
+· east = rotationAxis × up（右手定则，东方向）。
+· north = up × east（北方向）。
+
+此处的 north 是世界空间下的真实北方（指向自转轴在水平面的投影方向），它并不是固定指向 +Z 或 -Z。将 -Z 硬编码为北，仅在赤道零经度、自转角度 0、轴倾角 0 的特例才成立。对于一般位置和行星状态，方向标识会完全错误，用户看到的“北”与实际天体方位角矛盾。
+
+3.5 行星环放置修正
+
+行星环严格位于行星赤道平面，即垂直于自转轴（天极）。在局部坐标系中，自转轴为 +Y，环面为 X-Z 平面。因此环的旋转应使其法向量与 +Y 对齐。当前硬编码 -π/2.5 绕 X 轴倾斜，既不精确也与轴倾角无关。正确做法：
+
+· 环 Mesh 初始在 X-Z 平面（法向量为 Y）。
+· 在渲染时，环组件的 rotation 应等于行星的轴倾角旋转（绕 X 轴旋转 axisTilt），使得环法向量与真实自转轴一致。
+
+结论：必须实现完整的坐标转换链，修正方位角符号，并使用 ENU 向量定位方向标识。行星环需根据轴倾角精确旋转。
+
+---
+
+四、历法系统：为什么必须替换硬编码 413 天，并设计 426.15 天历法？
+
+4.1 当前问题
+
+calendar.ts 中 calculateDate 使用 YEAR_DAYS = 413（硬编码），且无任何置闰或补日规则。这与项目的回归年设定 426.15 完全不符，导致历法与天文季节严重脱节。
+
+4.2 历法设计目标
+
+· 平均年长尽可能接近 426.15 本地日。
+· 月数、月长设计兼顾文化设定（可自定义），但需保证算术自洽。
+· 提供明确的闰法，使日历日期与太阳回归年长期同步。
+
+4.3 推导过程
+
+回归年 D_⊙ = 426.15。
+
+基础年长：选择 413 天作为基础（10 个月，7×41 + 3×42 = 413），与原有硬编码衔接，但不等于真实年长。
+
+每年需补偿的天数：426.15 - 413 = 13.15 天。
+
+补日方案：每年固定插入 13 个额外天（岁末补日），使得平均年长变为 413 + 13 = 426 天，尚缺 0.15 天/年。
+
+闰日方案：0.15 × 7 = 1.05 天，故每 7 年增设 1 个闰日，使得 7 年总天数 = 7×426 + 1 = 2983 天，实际需要 7×426.15 = 2983.05 天，误差仅 0.05 天/7 年，即 0.007 天/年，精度极高。
+
+因此历法规则为：
+
+· 每年 10 个月（月长序列：[41,41,42,41,42,41,41,42,41,41]），共 413 天。
+· 岁末补 13 天（第 11 月），共 426 天。
+· 若年份能被 7 整除，则补日增至 14 天（含 1 闰日），共 427 天。
+
+4.4 与太阳回归年的校验
+
+取 T=0 为第 1 年 1 月 1 日（春分日），则经过一个回归年 T = 426.15 后，太阳再次过春分。此时日历应为第 2 年 1 月 1 日。按以上规则，第 1 年天数 426（平年）或 427（闰年），因此 T=426.15 时，日期大致为第 2 年 1 月 1 日前后（小数部分为时刻）。用 calendarFromT 计算可精确映射。
+
+4.5 工程意义
+
+· 原有 calculateSunDeclination 基于年进度比例余弦，天文模型替换后不再需要，改为直接由太阳黄经和纬度计算高度角。
+· calendarFromT 提供标准接口，所有显示历法日期的地方统一调用，消除硬编码。
+
+结论：完全重写 calendar.ts，实现基于 426.15 天、带置闰的历法系统，并与儒略日 T 挂钩。
+
+---
+
+五、渲染与性能：为什么必须用 ref 直接操作 Three.js 对象，而不触发 React 重渲染？
+
+5.1 现有问题
+
+Scene.tsx 中每帧调用 setBodyPositions(newPositions)，导致：
+
+· 整个 React 组件树重新协调（reconciliation），大量无关组件被重渲染。
+· 性能损耗巨大，尤其在行星数量多时无法稳定 60fps。
+
+5.2 解决方案依据
+
+Three.js 的 Object3D.position 等属性是直接可写的，不依赖 React 的数据流。通过 useRef 存储天体 Group 的引用，在 useFrame 中直接修改 group.position.copy(newPos)，可以完全绕过 React 渲染机制，极大提升帧率。
+
+5.3 太阳方向传递
+
+同样，行星光照方向 sunDirection 可以直接通过 uniform 更新，而不需要 React state。创建 Planet 组件时传入一个 sunDirectionRef，在 useFrame 中更新其值，并在对应的 ShaderMaterial 中每帧读取。
+
+结论：修改 Scene.tsx 和所有天体组件，使用 ref 操作位置，移除 setBodyPositions 这类 React state。
+
+---
+
+六、常量管理与工程化
+
+6.1 为什么必须集中常量？
+
+当前 DAY_IN_SECONDS、YEAR_IN_DAYS、axisTilt 等多个文件重复定义，值不一致，导致修改时极易遗漏。新建 src/config/constants.ts 作为唯一来源，导入即可。
+
+6.2 开启 TypeScript 严格模式
+
+tsconfig.json 中 strict: false 会导致潜在的类型错误被忽略，例如可能将 null 误当作对象。开启 strict: true 能提前暴露问题，但需要修复所有类型警告，是生产级项目的基本要求。
+
+6.3 废弃文件与路径清理
+
+src/config/celestialBodies.ts 仅有空导出，应删除，避免误解。所有天体数据已从 Zustand 加载。
+
+---
+
+七、总结：修改的原因及数学依据总表
+
+修改项 原因 数学/物理依据
+统一儒略日 T 保持太空与地表天象同步 所有运动（公转、自转、太阳黄经）都是 T 的函数
+实现 GMST/LST 将时间转换为地方时角 GMST = 2π(T/d_s), LST = GMST + λ
+三级精度太阳黄经 消除偏心率、章动、光行差误差 λ_⊙ = L₀ + C + Δψ - Δa，中心差公式，岁差不加
+黄道→赤道→地平转换 得到正确的天体高度角/方位角 球面三角旋转公式
+方位角负号修正 修正东西镜像 时角向西为正，推导见 3.3
+ENU 对齐方向标识 使地表标识指向真实天文北 north = up × east
+行星环精确旋转 环必须位于赤道面 环法向量与自转轴（天极）对齐
+426.15 天历法 与回归年同步 年长 426.15，10 月+13 补日，7 年一闰
+使用 ref 直接操作 Three.js 对象 避免每帧 React 重渲染 Three.js 对象属性可独立于 React 更新
+常量集中化 消除重复与不一致 单一导入源保证全局一致
+
+---
+
+本分析报告为每一项修改提供了详尽的科学依据与数学推导。AI 编程助手在生成代码时，应严格参照这些原因，确保修改后的系统在物理、数学和工程上完全自洽。
+
+
+天象推演系统 天文重构最终技术规格书（含完整历法）
+
+用途：直接交付 AI 编程助手，按文件生成或修改代码
+基准：项目审计报告（2026-06-09） + v3.1 球面天文模型
+状态：覆盖所有已知缺陷，严格基于现有项目边界，新增完整 426 天历法系统
+重要：本规格书不包含任何工期、阶段划分、任务分配等项目管理内容，所有描述均为精确的代码接口、公式与修改指令。
+
+---
+
+0. 先期纠正：原 v4.4 建议的若干错误
+
+在采用本规格前，请明确以下几点，避免引入错误：
+
+· 儒略日 T 初始值：本系统定义 T=0 为本初子午线春分日正午 12:00。初始值必须为 0，而不是 0.5。
+· 不可添加未讨论的新功能：如 7 条环缝、HIP 星表等，本规格不涉及，以免需求膨胀。
+· 渲染参数不应视为物理常数：如点光源 decay=2、光照距离等属于可调渲染参数，不应标记为“不可修改”。
+· 所有公式必须完整给出，杜绝空白占位符，确保可编码。
+· 历法系统完整设计：基于 426.15 回归年，替换原有的硬编码 413 天，给出大小月、补日、闰法全部规则。
+
+---
+
+一、全局常量定义
+
+新增文件 src/config/constants.ts，集中管理所有天文与时间常数，全项目由此导入，消除重复定义。
+
+```typescript
+// ========== 时间与天文基本常数 ==========
+/** 回归年（本地日），两次过移动春分点的时间 */
+export const D_YEAR = 426.15;
+/** 恒星日（本地日），恒星连续两次上中天 */
+export const D_S = 0.9976;
+/** 一本地日对应的地球秒（设定值） */
+export const SECONDS_PER_DAY = 24.15 * 3600; // = 86940 秒
+
+// ========== 黄赤交角与轨道 ==========
+/** 黄赤交角（度） */
+export const EPSILON_DEG = 12.0;
+/** 黄赤交角（弧度） */
+export const EPSILON_RAD = EPSILON_DEG * Math.PI / 180;
+/** 轨道偏心率 */
+export const ECCENTRICITY = 0.0167;
+
+// ========== 高精度修正参数 ==========
+/** 日月岁差速率（角秒/本地年），仅用于长期估算，不参与视位置 */
+export const P_ARCSEC_PER_YEAR = 50.3;
+/** 章动振幅（角秒） */
+export const A_N_ARCSEC = 9.2;
+/** 章动周期（本地年） */
+export const P_N_YEARS = 18.9;
+/** 光行差常数（角秒） */
+export const DELTA_A_ARCSEC = 20.5;
+
+// ========== 历法常数（基于 D_YEAR=426.15） ==========
+// 详见第六节历法设计
+export const MONTHS_IN_YEAR = 10;
+export const SMALL_MONTH_DAYS = 41;  // 小月
+export const BIG_MONTH_DAYS = 42;    // 大月
+export const BASE_YEAR_DAYS = 413;   // 7*41 + 3*42 = 413 基础年长
+export const EXTRA_DAYS_PER_YEAR = 13; // 每年固定补13天（共13.15，保留小数）
+export const LEAP_YEAR_CYCLE = 7;     // 每7年增补1天，协调小数 .15*7≈1.05
+```
+
+注意：历法常数的推导详见第六节，此处先提供使用值。
+
+---
+
+二、统一时间系统（Zustand Store 修改）
+
+2.1 新增 timeSystem 切片
+
+在 src/store/index.ts 的类型与状态中增加：
+
+```typescript
+interface TimeSystem {
+  T: number;          // 儒略日（本初子午线春分正午=0）
+  timeScale: number;  // 倍速（可正可负）
+  isPaused: boolean;
+}
+
+// 在 StoreState 中：
+timeSystem: TimeSystem;
+updateTimeSystem: (partial: Partial<TimeSystem>) => void;
+```
+
+初始状态：
+
+```typescript
+timeSystem: {
+  T: 0,
+  timeScale: 1,
+  isPaused: false,
+}
+```
+
+2.2 废弃旧字段
+
+删除以下已在 store 中的独立顶层字段（若有）：
+
+· timeScale、isPaused（移入 timeSystem）
+· detailPageState.globalTime、dayTime、yearTime（完全由 T 派生）
+
+所有组件应通过 useStore(s => s.timeSystem) 获取时间状态。
+
+---
+
+三、天文计算纯函数模块 (src/utils/astronomy.ts)
+
+本模块实现 v3.1 模型的所有坐标转换与太阳位置计算。函数纯输入输出，无副作用。
+
+```typescript
+import {
+  D2R, ARCSEC2RAD,
+  D_YEAR, D_S, ECCENTRICITY, EPSILON_RAD,
+  A_N_ARCSEC, P_N_YEARS, DELTA_A_ARCSEC
+} from '../config/constants';
+
+// 通用工具
+export function mod2pi(x: number): number { ... }
+export function clip(x: number, lo = -1, hi = 1): number { ... }
+
+// 时间转换
+export function calcGMST(T: number): number;     // T 单位本地日，使用 D_S
+export function calcLST(T: number, lonDeg: number): number;
+
+// 太阳黄经（三级精度）
+export function sunEclipticLow(T: number): number;
+export function sunEclipticMedium(T: number): number;
+export function sunEclipticHigh(T: number): [number, number]; // [λ_⊙(rad), ε'(rad)]
+
+// 坐标转换
+export function eclipticToEquatorial(lam: number, beta: number, epsPrime: number): [number, number];
+export function equatorialToHorizontal(alpha: number, delta: number, lst: number, phiRad: number): [number, number];
+
+// 大圆生成
+export function generateEclipticPoints(T: number, lonDeg: number, phiRad: number, N?: number): {h:number, A:number}[];
+export function generateRingPoints(lst: number, phiRad: number, N?: number): {h:number, A:number}[];
+
+// 辅助：地平坐标转世界方向向量（需观测点ENU）
+export function horizontalToWorldDir(h: number, A: number, up: Vector3, east: Vector3, north: Vector3): Vector3;
+```
+
+函数内部实现严格按照 v3.1 伪代码，此处不赘述。特别强调：
+
+· sunEclipticHigh 中不包含岁差项 Δp，只用章动+光行差。
+· 方位角计算使用 -cosδ·sin t 负号。
+· 所有 asin/acos 输入截断到 [-1,1]。
+
+---
+
+四、历法计算模块 (src/utils/calendar.ts) 重写
+
+原 calendar.ts 采用硬编码 YEAR_DAYS=413，现完全基于 D_YEAR=426.15 设计历法，并替换原有的 calculateDate 和 calculateSunDeclination（后者已由天文模块取代）。
+
+4.1 历法规则
+
+· 年：回归年 426.15 日。
+· 月：每年 10 个月，其中 7 个小月（每月 41 天），3 个大月（每月 42 天）。排列顺序为：小、小、大、小、大、小、小、大、小、小（可根据文化设定调整，但必须保证总数 7×41+3×42=413）。
+· 补日：每年固定补 13 天，置于第 10 个月之后，称为“岁末补日”。这 13 天不属于任何月。
+· 闰法：每 7 年增设 1 个闰日，追加在岁末补日的最后一天之后，称为“闰日”。因 13.15×7 = 92.05 天，而 13×7=91 天，差 1.05 天，故每 7 年加 1 天可使长期平均接近 13.15 天/年。
+
+4.2 计算接口
+
+```typescript
+// 由儒略日 T 计算历法日期
+export interface CalendarDate {
+  year: number;        // 从 1 开始
+  month: number;       // 1-10，若在补日则为 11（岁末补日）或 12（闰日）
+  day: number;         // 当月内日序号，补日期间为 1-13 或 1-14（闰年）
+  isIntercalary: boolean; // 是否补日/闰日
+  dayOfYear: number;   // 1-426（或闰年427）
+}
+
+export function calendarFromT(T: number): CalendarDate;
+```
+
+4.3 实现逻辑
+
+1. 计算自历元起的天数 totalDays = T + epochOffset。历元定义为第1年1月1日对应某个 T0。为简化，令 T=0 春分正午对应一个特定日期，可由设计决定。这里设定 第1年春分日即为 1 月 1 日，因此 T=0 时 totalDays = 0，日期为 1/1/1。
+2. 年长度函数：yearLength(year) = BASE_YEAR_DAYS + EXTRA_DAYS_PER_YEAR + (isLeapYear(year) ? 1 : 0)。isLeapYear(y) = (y % 7 === 0)。
+3. 从 totalDays 中逐年减去年长，得到 year 和年内日 dayOfYear（0-index）。
+4. 月内分配：
+   · 定义月长数组 [41,41,42,41,42,41,41,42,41,41]。
+   · 若 dayOfYear < 413，遍历月份扣减，得 month 和 day。
+   · 否则，month = 11（补日），day = dayOfYear - 413 + 1，isIntercalary = true。若 day === 14（仅闰年），则 month = 12（闰日）。
+5. 返回值。
+
+4.4 示例
+
+T = 0 → 1年1月1日。
+T = 426.15 → 下一年春分，应为 2年1月1日（因跨年）。
+
+---
+
+五、主循环与状态更新
+
+5.1 统一时间推进
+
+仅在 Scene.tsx 的 useFrame 中驱动时间：
+
+```tsx
+const timeSystem = useStore(s => s.timeSystem);
+const updateTimeSystem = useStore(s => s.updateTimeSystem);
+
+useFrame((state3f, delta) => {
+  if (timeSystem.isPaused) return;
+  const dtDays = (delta * timeSystem.timeScale * 1000) / (SECONDS_PER_DAY * 1000); // delta 为秒
+  updateTimeSystem({ T: timeSystem.T + dtDays });
+});
+```
+
+5.2 天体位置更新
+
+不再触发 React setState，直接操作 Three.js 对象引用：
+
+```tsx
+const bodyRefs = useRef<Map<string, THREE.Group>>(new Map());
+
+useFrame(() => {
+  // 更新 timeSystem.T 后，立即用最新的 T 计算所有行星位置
+  const T = useStore.getState().timeSystem.T;
+  celestialBodies.forEach(body => {
+    if (body.type === 'planet') {
+      const pos = calculatePlanetWorldPos(T, body);
+      const obj = bodyRefs.current.get(body.id);
+      if (obj) obj.position.copy(pos);
+      // 更新太阳方向 uniform（传递给 Planet 组件）
+    }
+  });
+  // 同样更新卫星等
+});
+```
+
+5.3 详情页时间读取
+
+DetailPage.tsx 移除独立计时器，直接读取 timeSystem.T。显示时，如需本地日比例 dayTime，通过 dayTime = ((T * SECONDS_PER_DAY) / 86400 + longitude/360) % 1 等方式派生，但太阳位置必须由天文模块计算。
+
+---
+
+六、渲染层修改要点
+
+6.1 Planet.tsx
+
+接收 sunDirection: THREE.Vector3 prop，在 useFrame 中更新材质的 uniform sunDirection。太阳方向从行星位置计算：sunDir = planetWorldPos.clone().negate().normalize()。
+
+6.2 SurfaceView.tsx 重写太阳与黄道环绘制
+
+· 使用 sunEclipticHigh 得到太阳赤经赤纬，结合 LST 和纬度获得地平坐标 (hSun, ASun)。
+· 通过 horizontalToWorldDir 转为世界方向，更新天空着色器 uniform、太阳 billboard 位置。
+· 黄道大圆：调用 generateEclipticPoints，将返回点转为世界方向数组，构建 THREE.Line。
+· 行星环大圆：调用 generateRingPoints，同样构建 Line。
+· DirectionMarkers：必须使用 ENU 的 north、east 向量定位，不再硬编码 -Z 为北。
+
+6.3 DetailPage PlanetMesh 太阳方向简化代码移除
+
+原 sunRef.current.set(Math.sin(angle), 0, Math.cos(angle)) 删除，改为从行星世界位置计算或从主场景传入。
+
+6.4 光照衰减
+
+恒星点光源设置 distance=200, decay=2 保留，但不再列为不可改常数。
+
+---
+
+七、清理与一致性
+
+· 删除 src/config/celestialBodies.ts（已空）。
+· 删除所有 DAY_IN_SECONDS、YEAR_IN_DAYS 重复定义，统一导入 constants.ts。
+· 删除 basePeriod 参数，keplerOrbit.ts 改为接收 orbitalPeriodDays。
+· OrbitalElements 类型新增 semiMajorAxis 用于周期计算（开普勒第三定律），或直接使用 orbitalPeriodDays，不必从半长轴推导。项目可简化：直接存入 orbitalPeriodDays。
+· CelestialBody 新增字段：orbitalPeriodDays: number; meanAnomalyAtEpoch: number;。
+
+---
+
+八、验证用例（要求生成的测试包含）
+
+1. 春分点太阳高度：T=0, φ=0, λ=0 → h ≈ 90° - Δa_ref·cosε。
+2. 环食条件：太阳黄经 0° 或 180° 时，δ=0。
+3. 方位角方向：赤道，δ=0，时角 π/2 → A=270°。
+4. 回归年闭合：T=D_YEAR → 太阳黄经 ≈ -Δa + Δψ。
+5. 历法元年：T=0 → 日期 1/1/1。
+6. 历法闰年：第 7 年应有 14 天补日。
+7. 环极地高度：φ=90° → 环点 h=0。
+
+---
+
+九、最终交付形式
+
+将以上各节转换为具体文件变更指令，AI 可按以下顺序实施：
+
+1. 新建 src/config/constants.ts。
+2. 新建 src/utils/astronomy.ts（完整实现）。
+3. 重写 src/utils/calendar.ts。
+4. 修改 src/store/index.ts（时间切片）。
+5. 修改 src/types/index.ts（新增类型）。
+6. 修改 src/components/Scene.tsx（统一时间驱动、ref 直接操作）。
+7. 修改 src/utils/keplerOrbit.ts（改用 T 和 orbitalPeriodDays）。
+8. 修改 src/components/Planet.tsx（接收 sunDirection）。
+9. 修改 src/components/DetailPage.tsx（移除独立计时器）。
+10. 重写 src/components/SurfaceView.tsx 中的太阳/黄道/环/标记部分。
+11. 全局清理重复常量，删除废弃文件。
+
+所有公式、接口、逻辑均已在本文明确给出，AI 编程助手可据此生成完整无误的 TypeScript 代码。历法系统已完整细化，无任何模糊之处。
+

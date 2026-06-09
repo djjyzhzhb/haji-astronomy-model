@@ -180,7 +180,7 @@ const defaultDetailPageState: DetailPageState = {
   dayTime: 0.5,
   yearTime: 0.25,
   globalTime: 0,
-  dayNightCycleSpeed: 0.005,
+  dayNightCycleSpeed: 1.0,   // 昼夜循环速度倍率（1.0=正常，控制详情页行星自转+太阳视运动速度）
   atmosphereGlowIntensity: 1.0,
   atmosphereInnerRadius: 1.05,  // 比例值，基于基础半径
   atmosphereOuterRadius: 1.25,  // 比例值，基于基础半径

@@ -424,9 +424,11 @@ function PlanetMesh({ customTexture }: { customTexture?: THREE.Texture | null })
   }, [detailPageState.ringParticleCount, detailPageState.ringParticleRadiusScale, baseRadius])
   
   useFrame((state, delta) => {
-    // 从时间系统获取当前 T，通过 astronomy 计算太阳方向
-    const T = useStore.getState().timeSystem.T
-    const [sunLon, epsPrime] = sunEclipticHigh(T)
+    // 从时间系统获取当前 T，应用 dayNightCycleSpeed 倍率得到有效时间
+    const rawT = useStore.getState().timeSystem.T
+    const { rotationSpeed, cloudSpeed, dayNightCycleSpeed: cs } = useStore.getState().detailPageState
+    const effectiveT = rawT * cs  // 昼夜循环有效时间（1.0倍率 = 正常）
+    const [sunLon, epsPrime] = sunEclipticHigh(effectiveT)
     const [sunRA, sunDec] = eclipticToEquatorial(sunLon, 0, epsPrime)
     const cosDec = Math.cos(sunDec)
     sunRef.current.set(
@@ -484,17 +486,17 @@ function PlanetMesh({ customTexture }: { customTexture?: THREE.Texture | null })
     ringMatMid.uniforms.sunDirection.value = sunRef.current
     ringMatOuter.uniforms.sunDirection.value = sunRef.current
     
-    // 行星自转 - 基于时间系统 T 的差量累积，避免调速时跳变
-    const { rotationSpeed, cloudSpeed } = detailPageState
-    let dT = T - prevTRef.current
-    // 处理时间重置 / 大幅跳变（如拖动时间滑块），允许跳变但限制单帧上限
+    // 行星自转 - 使用 rawT 差量（避免 dayNightCycleSpeed 倍率二次放大）
+    let dT = rawT - prevTRef.current
     if (dT < 0) dT = 0
-    if (dT > 0.5) dT = 0.5  // 约半天上限
-    prevTRef.current = T
-    
-    planetRotRef.current += dT * rotationSpeed * 2 * Math.PI
-    cloudRotRef.current += dT * cloudSpeed * 2 * Math.PI
-    ringRotRef.current += dT * rotationSpeed * 2 * Math.PI
+    if (dT > 0.5) dT = 0.5
+    prevTRef.current = rawT
+
+    // 昼夜循环倍率（1.0 = 正常）
+    const speedFactor = cs
+    planetRotRef.current += dT * rotationSpeed * 2 * Math.PI * speedFactor
+    cloudRotRef.current += dT * cloudSpeed * 2 * Math.PI * speedFactor
+    ringRotRef.current += dT * rotationSpeed * 2 * Math.PI * speedFactor
     
     if (meshRef.current) {
       meshRef.current.rotation.y = planetRotRef.current % (Math.PI * 2)
@@ -900,30 +902,30 @@ function DetailPage() {
           <button
             onClick={handleBack}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-800/80 hover:bg-gray-700 text-white rounded-lg transition-colors backdrop-blur-md border border-gray-700/50 text-sm touch-btn
-              max-md:px-2.5 max-md:py-1.5 max-md:text-xs max-md:gap-1"
+              max-md:px-2 max-md:py-1.5 max-md:text-xs max-md:gap-1"
           >
             <ArrowLeft size={18} className="max-md:w-4 max-md:h-4" />
-            <span className="max-md:hidden">返回</span>
+            <span className="max-md:text-[10px]">返回</span>
           </button>
 
           {/* 地表/轨道切换 */}
           <button
             onClick={toggleSurfaceView}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-800/80 hover:bg-gray-700 text-white rounded-lg transition-colors backdrop-blur-md border border-gray-700/50 text-sm touch-btn
-              max-md:px-2.5 max-md:py-1.5 max-md:text-xs max-md:gap-1"
+              max-md:px-2 max-md:py-1.5 max-md:text-xs max-md:gap-1"
           >
             {isSurfaceView ? <Globe size={18} className="max-md:w-4 max-md:h-4" /> : <Mountain size={18} className="max-md:w-4 max-md:h-4" />}
-            <span className="max-md:hidden">{isSurfaceView ? '轨道' : '地表'}</span>
+            <span className="max-md:text-[10px]">{isSurfaceView ? '轨道' : '地表'}</span>
           </button>
 
           {/* 地图按钮 */}
           <button
             onClick={() => setShowMap(!showMap)}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-800/80 hover:bg-gray-700 text-white rounded-lg transition-colors backdrop-blur-md border border-gray-700/50 text-sm touch-btn
-              max-md:px-2.5 max-md:py-1.5 max-md:text-xs max-md:gap-1"
+              max-md:px-2 max-md:py-1.5 max-md:text-xs max-md:gap-1"
           >
             <Map size={18} className="max-md:w-4 max-md:h-4" />
-            <span className="max-md:hidden">地图</span>
+            <span className="max-md:text-[10px]">地图</span>
           </button>
 
           {/* 参数控制按钮（仅移动端显示） */}
@@ -1202,9 +1204,9 @@ function DetailPage() {
                   <div className="flex items-center gap-1.5 text-gray-300">
                     <RotateCw size={12} className="max-md:w-2.5 max-md:h-2.5" />
                     <span className="text-xs max-md:text-[10px]">循环速度</span>
-                    <span className="ml-auto text-[10px] text-gray-400">{detailPageState.dayNightCycleSpeed.toFixed(2)}</span>
+                    <span className="ml-auto text-[10px] text-gray-400">{detailPageState.dayNightCycleSpeed.toFixed(1)}×</span>
                   </div>
-                  <input type="range" min="0" max="0.5" step="0.01" value={detailPageState.dayNightCycleSpeed}
+                  <input type="range" min="0.1" max="10" step="0.1" value={detailPageState.dayNightCycleSpeed}
                     onChange={(e) => updateDetailPageState({ dayNightCycleSpeed: parseFloat(e.target.value) })}
                     className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-yellow-500" />
                 </div>

@@ -208,14 +208,14 @@ export default function ControlPanel({ isMobilePortrait, isMobileLandscape, isMo
         <div className="px-2 py-2 border-b border-gray-700/30">
           <div className="text-[10px] text-gray-500 mb-1.5">显示</div>
           <div className="grid grid-cols-3 gap-1">
-            <button onClick={toggleOrbits} className={`touch-btn py-1.5 rounded text-[10px] transition-colors ${showOrbits ? 'bg-blue-600/60 text-white' : 'bg-gray-700/40 text-gray-300'}`}>
-              <CircleOff size={11} />
+            <button onClick={toggleOrbits} className={`touch-btn py-1.5 rounded text-[10px] transition-colors flex items-center justify-center gap-0.5 ${showOrbits ? 'bg-blue-600/60 text-white' : 'bg-gray-700/40 text-gray-300'}`}>
+              <CircleOff size={11} /><span className="text-[9px]">轨道</span>
             </button>
-            <button onClick={() => setShowAtmosphere(!showAtmosphere)} className={`touch-btn py-1.5 rounded text-[10px] transition-colors ${showAtmosphere ? 'bg-cyan-600/60 text-white' : 'bg-gray-700/40 text-gray-300'}`}>
-              <Gauge size={11} />
+            <button onClick={() => setShowAtmosphere(!showAtmosphere)} className={`touch-btn py-1.5 rounded text-[10px] transition-colors flex items-center justify-center gap-0.5 ${showAtmosphere ? 'bg-cyan-600/60 text-white' : 'bg-gray-700/40 text-gray-300'}`}>
+              <Gauge size={11} /><span className="text-[9px]">大气</span>
             </button>
-            <button onClick={() => setShowRings(!showRings)} className={`touch-btn py-1.5 rounded text-[10px] transition-colors ${showRings ? 'bg-amber-600/60 text-white' : 'bg-gray-700/40 text-gray-300'}`}>
-              <Globe size={11} />
+            <button onClick={() => setShowRings(!showRings)} className={`touch-btn py-1.5 rounded text-[10px] transition-colors flex items-center justify-center gap-0.5 ${showRings ? 'bg-amber-600/60 text-white' : 'bg-gray-700/40 text-gray-300'}`}>
+              <Globe size={11} /><span className="text-[9px]">环</span>
             </button>
           </div>
         </div>
@@ -286,7 +286,7 @@ export default function ControlPanel({ isMobilePortrait, isMobileLandscape, isMo
         {/* 展开面板 */}
         <div className={`
           overflow-y-auto slim-scrollbar transition-all duration-300 ease-in-out
-          ${mobileExpanded ? 'max-h-[55vh] opacity-100 py-1' : 'max-h-0 opacity-0 py-0'}
+          ${mobileExpanded ? 'max-h-[62vh] opacity-100 py-1' : 'max-h-0 opacity-0 py-0'}
         `} style={{ pointerEvents: mobileExpanded ? 'auto' : 'none' }}>
           
           {/* 手动输入 */}
@@ -312,7 +312,7 @@ export default function ControlPanel({ isMobilePortrait, isMobileLandscape, isMo
                   key={planet.id}
                   onClick={() => handlePlanetClick(planet)}
                   className={`
-                    touch-btn py-1.5 px-2.5 rounded-full text-[11px] leading-tight transition-all
+                    touch-btn py-2.5 px-2.5 rounded-full text-[11px] leading-tight transition-all min-h-[36px] flex items-center
                     ${selectedBody?.id === planet.id
                       ? 'bg-blue-600/80 text-white ring-1 ring-blue-400'
                       : 'bg-gray-800/60 text-gray-300 hover:bg-gray-700/60'}
@@ -322,7 +322,7 @@ export default function ControlPanel({ isMobilePortrait, isMobileLandscape, isMo
                 </button>
               ))}
               <button onClick={() => { selectBody(null); setFocusBody(null) }}
-                className="touch-btn py-1.5 px-2.5 rounded-full text-[11px] bg-gray-700/30 text-gray-400 hover:bg-gray-600/50">
+                className="touch-btn py-2.5 px-2.5 rounded-full text-[11px] bg-gray-700/30 text-gray-400 hover:bg-gray-600/50 transition-all min-h-[36px] flex items-center">
                 全景
               </button>
             </div>
@@ -343,14 +343,14 @@ export default function ControlPanel({ isMobilePortrait, isMobileLandscape, isMo
                 </button>
               </div>
               <div className="flex items-center gap-1.5">
-                <button onClick={toggleOrbits} className={`touch-btn p-1.5 rounded transition-colors ${showOrbits ? 'bg-blue-600/60 text-white' : 'bg-gray-800/50 text-gray-400'}`}>
-                  <CircleOff size={12} />
+                <button onClick={toggleOrbits} className={`touch-btn p-1.5 rounded transition-colors flex items-center gap-0.5 ${showOrbits ? 'bg-blue-600/60 text-white' : 'bg-gray-800/50 text-gray-400'}`}>
+                  <CircleOff size={12} /><span className="text-[10px]">轨道</span>
                 </button>
-                <button onClick={() => setShowAtmosphere(!showAtmosphere)} className={`touch-btn p-1.5 rounded transition-colors ${showAtmosphere ? 'bg-cyan-600/60 text-white' : 'bg-gray-800/50 text-gray-400'}`}>
-                  <Gauge size={12} />
+                <button onClick={() => setShowAtmosphere(!showAtmosphere)} className={`touch-btn p-1.5 rounded transition-colors flex items-center gap-0.5 ${showAtmosphere ? 'bg-cyan-600/60 text-white' : 'bg-gray-800/50 text-gray-400'}`}>
+                  <Gauge size={12} /><span className="text-[10px]">大气</span>
                 </button>
-                <button onClick={() => setShowRings(!showRings)} className={`touch-btn p-1.5 rounded transition-colors ${showRings ? 'bg-amber-600/60 text-white' : 'bg-gray-800/50 text-gray-400'}`}>
-                  <Globe size={12} />
+                <button onClick={() => setShowRings(!showRings)} className={`touch-btn p-1.5 rounded transition-colors flex items-center gap-0.5 ${showRings ? 'bg-amber-600/60 text-white' : 'bg-gray-800/50 text-gray-400'}`}>
+                  <Globe size={12} /><span className="text-[10px]">环</span>
                 </button>
               </div>
             </div>
@@ -452,8 +452,8 @@ export default function ControlPanel({ isMobilePortrait, isMobileLandscape, isMo
         </div>
       </div>
 
-      <div className="bg-gray-900/70 backdrop-blur-sm border-t border-gray-700/30 px-3 py-1.5">
-        <div className="flex items-center gap-2 overflow-x-auto max-w-screen-xl mx-auto scrollbar-thin">
+      <div className="bg-gray-900/70 backdrop-blur-sm border-t border-gray-700/30 px-3 py-2.5">
+        <div className="flex items-center gap-2 overflow-x-auto max-w-screen-xl mx-auto slim-scrollbar touch-pan-x" style={{ WebkitOverflowScrolling: 'touch' }}>
           <span className="text-[10px] text-gray-500 shrink-0 mr-1">天体:</span>
           {planets.map((planet) => (
             <button

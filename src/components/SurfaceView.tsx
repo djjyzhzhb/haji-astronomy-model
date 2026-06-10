@@ -1180,7 +1180,18 @@ function SurfaceViewScene({
 
   // 使用 astronomy 模块计算太阳地平位置
   const timeSystem = useStore(s => s.timeSystem)
+  const updateTimeSystem = useStore(s => s.updateTimeSystem)
   const T = timeSystem.T
+  
+  // 地表视图独立推进 T（切断原始 DetailScene Canvas 后接管）
+  useFrame((_state, delta) => {
+    const ts = useStore.getState().timeSystem
+    if (!ts.isPaused) {
+      const dtDays = delta * ts.timeScale / 10
+      updateTimeSystem({ T: ts.T + dtDays })
+    }
+  })
+
   const [sunAltAstro, sunAzAstro] = useMemo(() => {
     const [sunLon, epsPrime] = sunEclipticHigh(T)
     const [sunRA, sunDec] = eclipticToEquatorial(sunLon, 0, epsPrime)

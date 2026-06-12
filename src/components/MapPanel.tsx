@@ -229,34 +229,20 @@ function MapPanel({
   }
 
   // 构建 nStop 个等距 stops，每段的颜色按到直射经度的最短路径距离计算
+  // 亮度曲线：d=0°(直射) → 1.0 正午，d=90°(晨昏线) → 0.5 晨昏，d=180°(子夜) → 0.0 夜
+  // 统一用 brightness = 0.5 * (1 + cos(d * π/180))，不再分区间，避免双过渡
   const nStops = 72
   const stopsArr: string[] = []
   for (let i = 0; i <= nStops; i++) {
     const pct = i / nStops                  // 当前 stop 在条带上的位置 [0,1]
     const lonDeg = pct * 360 - 180          // 对应的经度 [-180, 180]
-    // 到直射经度的最短距离（沿最短路径，0-180°）
     let d = Math.abs(lonDeg - astro.subsolarLon)
-    if (d > 180) d = 360 - d
-    // 亮度曲线：0° → 1.0 (最亮)，90° → 0.5 (晨昏)，180° → 0.0 (最深夜)
-    // 用平滑的余弦衰减：brightness = 0.5 * (1 + cos(d * π/90))，d<=90
-    // 对于 d > 90°，亮度降至 0 (纯夜)
-    let brightness: number
-    if (d <= 85) {
-      brightness = 0.5 * (1 + Math.cos(d * Math.PI / 90))
-    } else if (d <= 95) {
-      // 85-95°：从夜到昏的过渡带
-      const t = (d - 85) / 10
-      brightness = (1 - t) * 0.5 * (1 + Math.cos(85 * Math.PI / 180)) + t * 0.05
-    } else {
-      brightness = 0.0
-    }
+    if (d > 180) d = 360 - d               // 到直射经度的最短距离（0-180°）
+    const brightness = 0.5 * (1 + Math.cos(d * Math.PI / 180))
     // 颜色映射：brightness=0 → cNight, brightness=0.5 → cDusk, brightness=1 → cDay
-    let color: string
-    if (brightness >= 0.5) {
-      color = lerpColor(cDusk, cDay, (brightness - 0.5) * 2)
-    } else {
-      color = lerpColor(cNight, cDusk, brightness * 2)
-    }
+    const color = brightness >= 0.5
+      ? lerpColor(cDusk, cDay, (brightness - 0.5) * 2)
+      : lerpColor(cNight, cDusk, brightness * 2)
     stopsArr.push(`${color} ${(pct * 100).toFixed(3)}%`)
   }
   const dayNightGradient = `linear-gradient(to right, ${stopsArr.join(', ')})`

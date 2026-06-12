@@ -139,13 +139,13 @@ function MapPanel({
   const tickRef = useRef<number | null>(null)
   const [, forceUpdate] = useState(0)
 
-  // 4Hz 刷新 —— 不抢主线程，同时足够平滑
+  // 10Hz 刷新 —— 视觉上更流畅，同时保持低开销
   useEffect(() => {
     if (!open) return
     const tick = () => {
       forceUpdate((n) => (n + 1) % 1000000)
     }
-    tickRef.current = window.setInterval(tick, 250) as unknown as number
+    tickRef.current = window.setInterval(tick, 100) as unknown as number
     return () => {
       if (tickRef.current) {
         clearInterval(tickRef.current)
@@ -208,28 +208,58 @@ function MapPanel({
 
   const lonToPct = (lonDeg: number) => (lonDeg + 180) / 360
   const sunLonPct = lonToPct(astro.subsolarLon)
-  const sunriseLonPct = lonToPct(normalizeLonDeg(astro.subsolarLon - 90))
-  const sunsetLonPct = lonToPct(normalizeLonDeg(astro.subsolarLon + 90))
   const yearProgress = (astro.sunLonRad + Math.PI) / (2 * Math.PI)
 
-  // —— 动态昼夜经度渐变：亮黄带中心 = 太阳直射经度，半宽 90°（1/4 条宽）——
-  // 即整条条的 50% 是昼半球，直射经度 ± 90° 精确对应日出/日落
-  // 用分段线性渐变，中心最亮，±90° 处刚好变成黑夜色
-  const cNight = '#0b1220'     // 深夜
-  const cDusk = '#1e3a5f'       // 晨昏（日出/日落）
-  const cDay = '#fef3c7'        // 正午
-  const pctStop = (pct: number, color: string) =>
-    `${color} ${(Math.max(0, Math.min(1, pct)) * 100).toFixed(2)}%`
-  const stops = [
-    pctStop(0, cNight),
-    pctStop(sunriseLonPct - 0.02, cNight),
-    pctStop(sunriseLonPct, cDusk),
-    pctStop(sunLonPct, cDay),
-    pctStop(sunsetLonPct, cDusk),
-    pctStop(sunsetLonPct + 0.02, cNight),
-    pctStop(1, cNight),
-  ]
-  const dayNightGradient = `linear-gradient(to right, ${stops.join(', ')})`
+  // —— 昼夜经度条：用密集 stops 构造精确的亮度曲线，彻底避免环绕问题 ——
+  // 对 [-180,180] 的每个经度段，用 |lon - subsolarLon| 最短路径距离
+  // 来决定该位置的亮度（0=夜晚, 1=正午），统一处理所有情况。
+  const cNight = '#0b1220'
+  const cDusk = '#1e3a5f'
+  const cDay = '#fef3c7'
+
+  // 线性插值颜色
+  function lerpColor(a: string, b: string, t: number): string {
+    const ah = parseInt(a.slice(1), 16), bh = parseInt(b.slice(1), 16)
+    const ar = (ah >> 16) & 255, ag = (ah >> 8) & 255, ab = ah & 255
+    const br = (bh >> 16) & 255, bg = (bh >> 8) & 255, bb = bh & 255
+    const r = Math.round(ar + (br - ar) * t)
+    const g = Math.round(ag + (bg - ag) * t)
+    const bl = Math.round(ab + (bb - ab) * t)
+    return `rgb(${r},${g},${bl})`
+  }
+
+  // 构建 nStop 个等距 stops，每段的颜色按到直射经度的最短路径距离计算
+  const nStops = 72
+  const stopsArr: string[] = []
+  for (let i = 0; i <= nStops; i++) {
+    const pct = i / nStops                  // 当前 stop 在条带上的位置 [0,1]
+    const lonDeg = pct * 360 - 180          // 对应的经度 [-180, 180]
+    // 到直射经度的最短距离（沿最短路径，0-180°）
+    let d = Math.abs(lonDeg - astro.subsolarLon)
+    if (d > 180) d = 360 - d
+    // 亮度曲线：0° → 1.0 (最亮)，90° → 0.5 (晨昏)，180° → 0.0 (最深夜)
+    // 用平滑的余弦衰减：brightness = 0.5 * (1 + cos(d * π/90))，d<=90
+    // 对于 d > 90°，亮度降至 0 (纯夜)
+    let brightness: number
+    if (d <= 85) {
+      brightness = 0.5 * (1 + Math.cos(d * Math.PI / 90))
+    } else if (d <= 95) {
+      // 85-95°：从夜到昏的过渡带
+      const t = (d - 85) / 10
+      brightness = (1 - t) * 0.5 * (1 + Math.cos(85 * Math.PI / 180)) + t * 0.05
+    } else {
+      brightness = 0.0
+    }
+    // 颜色映射：brightness=0 → cNight, brightness=0.5 → cDusk, brightness=1 → cDay
+    let color: string
+    if (brightness >= 0.5) {
+      color = lerpColor(cDusk, cDay, (brightness - 0.5) * 2)
+    } else {
+      color = lerpColor(cNight, cDusk, brightness * 2)
+    }
+    stopsArr.push(`${color} ${(pct * 100).toFixed(3)}%`)
+  }
+  const dayNightGradient = `linear-gradient(to right, ${stopsArr.join(', ')})`
 
   return (
     <div
@@ -277,7 +307,7 @@ function MapPanel({
               </div>
               <div
                 className="relative w-full h-4 rounded-md overflow-hidden"
-                style={{ background: dayNightGradient }}
+                style={{ background: dayNightGradient, transition: 'background 120ms linear' }}
               />
               <div className="relative mt-1 text-[10px] text-gray-500 max-md:text-[8px] h-3">
                 <span className="absolute left-0">-180°</span>

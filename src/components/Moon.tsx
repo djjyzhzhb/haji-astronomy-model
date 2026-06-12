@@ -4,7 +4,7 @@ import * as THREE from 'three'
 import { CelestialBody } from '../types'
 import { useStore } from '../store'
 import { getTextureByType } from '../utils/textureGenerator'
-import { calculateOrbitalPositionFromT, calculateOrbitalPositionScaled } from '../utils/keplerOrbit'
+import { calculateOrbitalPositionFast, calculateOrbitalPositionScaled } from '../utils/keplerOrbit'
 
 interface MoonProps {
   body: CelestialBody
@@ -32,7 +32,7 @@ function Moon({ body }: MoonProps) {
     if (groupRef.current && body.orbitalElements) {
       let pos: { x: number; y: number; z: number }
       if (body.orbitalPeriodDays) {
-        pos = calculateOrbitalPositionFromT(T, body.orbitalPeriodDays, body.orbitalElements)
+        pos = calculateOrbitalPositionFast(T, body.orbitalPeriodDays, body.orbitalElements)
         groupRef.current.position.set(pos.x * distanceScale, pos.y * distanceScale, pos.z * distanceScale)
       } else {
         pos = calculateOrbitalPositionScaled(T, body.orbitalElements, distanceScale, 30)

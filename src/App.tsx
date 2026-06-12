@@ -131,6 +131,52 @@ function App() {
     }
   }, [navigateToDetail])
 
+  // 全局拦截浏览器手势：阻止 iOS 滑动返回、下拉刷新、双指缩放
+  useEffect(() => {
+    const preventTouch = (e: TouchEvent) => {
+      // 允许表单控件、按钮等的原生触摸
+      const target = e.target as HTMLElement | null
+      if (!target) return
+      const tag = target.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'OPTION') return
+
+      if (e.touches.length > 1) {
+        // 多指手势：阻止系统级别的缩放/滑动返回
+        e.preventDefault()
+        return
+      }
+      // 单指快速的边缘手势（iOS 滑动返回）：在左右边缘 20px 区域内水平滑动时阻止
+      if (e.cancelable) {
+        const touch = e.touches[0]
+        if (touch && (touch.clientX < 20 || touch.clientX > window.innerWidth - 20)) {
+          e.preventDefault()
+        }
+      }
+    }
+
+    // 手势滚动/缩放
+    const preventGesture = (e: Event) => e.preventDefault()
+    // 页面中键菜单
+    const preventContext = (e: Event) => {
+      const target = e.target as HTMLElement | null
+      if (!target || (target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA')) {
+        e.preventDefault()
+      }
+    }
+
+    window.addEventListener('touchmove', preventTouch, { passive: false })
+    window.addEventListener('gesturestart', preventGesture)
+    window.addEventListener('gesturechange', preventGesture)
+    window.addEventListener('contextmenu', preventContext)
+
+    return () => {
+      window.removeEventListener('touchmove', preventTouch)
+      window.removeEventListener('gesturestart', preventGesture)
+      window.removeEventListener('gesturechange', preventGesture)
+      window.removeEventListener('contextmenu', preventContext)
+    }
+  }, [])
+
   // 竖屏时显示横屏旋转提示，3 秒后自动消失
   useEffect(() => {
     if (isPortrait) {
@@ -147,7 +193,7 @@ function App() {
   }
 
   return (
-    <div className="w-full h-full relative flex flex-col" style={{ backgroundColor }}>
+    <div className="w-full h-full relative flex flex-col" style={{ backgroundColor, touchAction: 'none', overscrollBehavior: 'none' }}>
       {/* 横屏旋转提示 */}
       {isPortrait && showHint && (
         <div className="orientation-hint animate-hint-pulse">

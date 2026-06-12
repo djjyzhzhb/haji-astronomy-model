@@ -101,9 +101,9 @@ export default function ControlPanel({ isMobilePortrait, isMobileLandscape, isMo
   }, [inputValue, timeSystem.timeScale, handleTimeScaleChange])
 
   const resetTimeScale = useCallback(() => {
-    handleTimeScaleChange(10.0)  // 默认10 → 物理速度 1.0 本地日/秒
+    handleTimeScaleChange(1.0)  // 默认1.0 → 物理速度 0.1 本地日/秒
     if (timeScaleSliderRef.current) {
-      timeScaleSliderRef.current.value = actualToSlider(10.0).toString()
+      timeScaleSliderRef.current.value = actualToSlider(1.0).toString()
     }
   }, [handleTimeScaleChange])
 

@@ -37,3 +37,9 @@ lerna-debug.log*
 # Project docs (local only)
 /星球设定.txt
 /行星系统参数报告.md
+
+# Temporary test scripts (临时测试脚本)
+test_*.js
+
+# Temporary ad-hoc text snippets (临时文本文件)
+---*.txt

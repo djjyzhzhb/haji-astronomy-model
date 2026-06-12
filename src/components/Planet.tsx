@@ -7,7 +7,7 @@ import Moon from './Moon'
 import Orbit from './Orbit'
 import { getTextureByType } from '../utils/textureGenerator'
 import { usePlanetTexture, getIsHabitable } from '../utils/planetTextureCache'
-import { calculateOrbitalPositionFromT, calculateOrbitalPositionScaled } from '../utils/keplerOrbit'
+import { calculateOrbitalPositionFast, calculateOrbitalPositionScaled } from '../utils/keplerOrbit'
 
 // 环着色器 — 全3D光照 + 相位梯度（迎光面亮→背光面暗）
 const ringVertexShader = /* glsl */ `
@@ -139,7 +139,7 @@ function Planet({ body, moons }: PlanetProps) {
     if (groupRef.current && body.orbitalElements) {
       let pos: { x: number; y: number; z: number }
       if (body.orbitalPeriodDays) {
-        pos = calculateOrbitalPositionFromT(T, body.orbitalPeriodDays, body.orbitalElements)
+        pos = calculateOrbitalPositionFast(T, body.orbitalPeriodDays, body.orbitalElements)
         groupRef.current.position.set(pos.x * distanceScale, pos.y * distanceScale, pos.z * distanceScale)
       } else {
         pos = calculateOrbitalPositionScaled(T, body.orbitalElements, distanceScale, 50)
@@ -252,7 +252,7 @@ function Planet({ body, moons }: PlanetProps) {
           receiveShadow={showShadows}
           renderOrder={2}
         >
-          <sphereGeometry args={[scaledRadius, 128, 128]} />
+          <sphereGeometry args={[scaledRadius, 48, 48]} />
           {customTexture ? (
             <meshStandardMaterial
               map={customTexture}

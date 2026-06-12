@@ -246,7 +246,7 @@ function PlanetMesh({ customTexture }: { customTexture?: THREE.Texture | null })
   
   const planet = celestialBodies.find(body => body.id === selectedPlanetId)
   const textureType = planet?.textureType || 'earth-like'
-  
+
   // 初始化时从星球数据同步参数（只在第一次进入时）
   useEffect(() => {
     if (planet) {
@@ -256,6 +256,15 @@ function PlanetMesh({ customTexture }: { customTexture?: THREE.Texture | null })
       })
     }
   }, [planet?.id]) // 只在星球ID变化时触发
+
+  // 挂载时查找一次场景中的定向光（shadowMap 注入 shader），避免每帧遍历
+  useEffect(() => {
+    scene.traverse((obj) => {
+      if (obj instanceof THREE.DirectionalLight && obj.castShadow) {
+        lightRef.current = obj
+      }
+    })
+  }, [scene])
   
   const settings = useMemo(() => qualitySettings[detailPageState.qualityLevel], [detailPageState.qualityLevel])
   
@@ -459,14 +468,6 @@ function PlanetMesh({ customTexture }: { customTexture?: THREE.Texture | null })
     if (meshRef.current?.material instanceof THREE.ShaderMaterial) {
       const mat = meshRef.current.material
       mat.uniforms.sunDirection.value = sunRef.current
-      // 每帧拉一次 directionalLight 的阴影数据注入 shader
-      if (!lightRef.current) {
-        scene.traverse((obj) => {
-          if (obj instanceof THREE.DirectionalLight && obj.castShadow) {
-            lightRef.current = obj
-          }
-        })
-      }
       if (lightRef.current?.shadow?.map?.texture) {
         mat.uniforms.shadowMap.value = lightRef.current.shadow.map.texture
         mat.uniforms.shadowMatrix.value.copy(lightRef.current.shadow.matrix)
@@ -850,9 +851,9 @@ function DetailPage() {
     setSurfaceObservation({ fov: newFov })
   }
 
-  // 触控事件处理
   const handleTouchStart = (e: React.TouchEvent) => {
     if (!isSurfaceView) return
+    e.preventDefault()
     const touch = e.touches[0]
     setIsDragging(true)
     dragStartRef.current = { x: touch.clientX, y: touch.clientY }
@@ -860,6 +861,7 @@ function DetailPage() {
 
   const handleTouchMove = (e: React.TouchEvent) => {
     if (!isSurfaceView || !isDragging) return
+    e.preventDefault()
     const touch = e.touches[0]
     const deltaX = touch.clientX - dragStartRef.current.x
     const deltaY = touch.clientY - dragStartRef.current.y
@@ -959,7 +961,7 @@ function DetailPage() {
         onTouchStart={isSurfaceView ? handleTouchStart : undefined}
         onTouchMove={isSurfaceView ? handleTouchMove : undefined}
         onTouchEnd={isSurfaceView ? handleTouchEnd : undefined}
-        style={{ cursor: isSurfaceView ? (isDragging ? 'grabbing' : 'grab') : 'default' }}
+        style={{ cursor: isSurfaceView ? (isDragging ? 'grabbing' : 'grab') : 'default', touchAction: 'none' }}
       >
         {isSurfaceView && planet ? (
           <SurfaceView
@@ -1009,10 +1011,10 @@ function DetailPage() {
           onSelectPoint={(lat, lon) => {
             setSurfaceObservation({ latitude: lat, longitude: lon })
           }}
-          dayTime={dayTime}
-          yearProgress={yearProgress}
+          dayNightCycleSpeed={detailPageState.dayNightCycleSpeed}
+          rotationSpeed={detailPageState.rotationSpeed}
           axialTilt={detailPageState.axialTilt}
-          globalTime={T}
+          localYearDays={426.15}
         />
       )}
 

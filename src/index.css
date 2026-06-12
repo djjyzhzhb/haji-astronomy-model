@@ -6,6 +6,16 @@
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+html, body {
+  overscroll-behavior: none;
+  touch-action: none;
+  overflow: hidden;
+  background-color: #000;
 }
 
 body {
@@ -16,9 +26,18 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* 允许文本输入框内选中文字 */
+input, textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 #root {
   width: 100vw;
   height: 100vh;
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: none;
   /* iPhone 刘海 + 手势条安全区域 */
   padding-top: env(safe-area-inset-top, 0px);
   padding-bottom: env(safe-area-inset-bottom, 0px);
@@ -28,6 +47,7 @@ body {
 
 canvas {
   display: block;
+  touch-action: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

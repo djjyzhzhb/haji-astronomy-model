@@ -47,10 +47,10 @@ function CelestialTrajectoryLocal({ celestialBodies, observerPlanet, globalTime,
 }) {
   const trajectories = useMemo(() => {
     const result: { body: CelestialBody; points: THREE.Vector3[]; opacity: number }[] = []
-    
+
     const basePeriod = D_YEAR / Math.pow(observerPlanet.orbitalElements!.semiMajorAxis, 1.5)
     const observerAxialTilt = observerPlanet.axialTilt || 0.33
-    
+
     // 局部坐标转换辅助函数
     const horizontalToLocal = (h: number, A: number) => {
       const cosH = Math.cos(h)
@@ -59,94 +59,96 @@ function CelestialTrajectoryLocal({ celestialBodies, observerPlanet, globalTime,
       const sinA = Math.sin(A)
       return new THREE.Vector3(cosH * sinA, sinH, cosH * cosA)
     }
-    
+
     celestialBodies.forEach(body => {
-      // 跳过观测者自身
       if (body.id === observerPlanet.id) return
-      
+
       const points: THREE.Vector3[] = []
       const numPoints = 80
       let trajectoryOpacity = 0.3
-      
+
+      // 轨迹是天体在一个完整轨道周期内的天空路径 —— 与当前时刻无关。
+      // 从 T=0 开始采样一个完整周期，避免每帧重建几何。
+
       if (body.type === 'star') {
         for (let i = 0; i <= numPoints; i++) {
           const t = i / numPoints
-          const time = globalTime + t * D_YEAR
+          const time = t * D_YEAR
           const planetPos = calculateOrbitalPositionScaled(time, observerPlanet.orbitalElements!, 1, basePeriod)
           const planetWorldPos = new THREE.Vector3(planetPos.x, planetPos.y, planetPos.z)
           const sunWorldPos = new THREE.Vector3(0, 0, 0)
           const planetRotationAngle = time * (2 * Math.PI)
-          
+
           const altAz = worldToSkyPosition(
             sunWorldPos, planetWorldPos,
             observerAxialTilt, planetRotationAngle,
             latitude, longitude, observerPlanet.radius
           )
-          
+
           if (altAz.altitude < -0.1) continue
           const dir = horizontalToLocal(altAz.altitude, altAz.azimuth)
           points.push(dir.clone().multiplyScalar(750))
         }
         trajectoryOpacity = 0.35
-        
+
       } else if (body.parentId && body.type === 'moon') {
         const orbitalPeriodDays = body.orbitalPeriodDays || 30
         const moonBasePeriod = orbitalPeriodDays / Math.pow(body.orbitalElements!.semiMajorAxis, 1.5)
-        
+
         for (let i = 0; i <= numPoints; i++) {
           const t = i / numPoints
-          const time = globalTime + t * orbitalPeriodDays
+          const time = t * orbitalPeriodDays
           const satellitePos = calculateOrbitalPositionScaled(time, body.orbitalElements!, 1, moonBasePeriod)
           const worldPos = new THREE.Vector3(satellitePos.x, satellitePos.y, satellitePos.z).add(observerPlanetWorldPos)
           const planetRotationAngle = time * (2 * Math.PI)
-          
+
           const altAz = worldToSkyPosition(
             worldPos, observerPlanetWorldPos,
             observerAxialTilt, planetRotationAngle,
             latitude, longitude, observerPlanet.radius
           )
-          
+
           if (altAz.altitude < -0.1) continue
           const dir = horizontalToLocal(altAz.altitude, altAz.azimuth)
           points.push(dir.clone().multiplyScalar(750))
         }
         trajectoryOpacity = 0.25
-        
+
       } else if (body.type === 'planet' && body.orbitalElements) {
         const outerBasePeriod = D_YEAR / Math.pow(body.orbitalElements.semiMajorAxis, 1.5)
-        
+
         for (let i = 0; i <= numPoints; i++) {
           const t = i / numPoints
-          const time = globalTime + t * D_YEAR
-          
+          const time = t * D_YEAR
+
           const observerPos = calculateOrbitalPositionScaled(time, observerPlanet.orbitalElements!, 1, basePeriod)
           const observerWorldPos = new THREE.Vector3(observerPos.x, observerPos.y, observerPos.z)
-          
+
           const outerPos = calculateOrbitalPositionScaled(time, body.orbitalElements!, 1, outerBasePeriod)
           const outerWorldPos = new THREE.Vector3(outerPos.x, outerPos.y, outerPos.z)
-          
+
           const planetRotationAngle = time * (2 * Math.PI)
-          
+
           const altAz = worldToSkyPosition(
             outerWorldPos, observerWorldPos,
             observerAxialTilt, planetRotationAngle,
             latitude, longitude, observerPlanet.radius
           )
-          
+
           if (altAz.altitude < -0.1) continue
           const dir = horizontalToLocal(altAz.altitude, altAz.azimuth)
           points.push(dir.clone().multiplyScalar(750))
         }
         trajectoryOpacity = 0.2
       }
-      
+
       if (points.length > 1) {
         result.push({ body, points, opacity: trajectoryOpacity })
       }
     })
-    
+
     return result
-  }, [celestialBodies, observerPlanet, globalTime, observerPlanetWorldPos, latitude, longitude])
+  }, [celestialBodies, observerPlanet, observerPlanetWorldPos, latitude, longitude])
 
   return (
     <group>

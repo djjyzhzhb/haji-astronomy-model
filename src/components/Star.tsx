@@ -41,7 +41,7 @@ function Star({ body }: StarProps) {
           selectBody(body)
         }}
       >
-        <sphereGeometry args={[scaledRadius, 128, 128]} />
+        <sphereGeometry args={[scaledRadius, 64, 64]} />
         <meshBasicMaterial 
           color={body.color}
         />
@@ -49,7 +49,7 @@ function Star({ body }: StarProps) {
       
       {/* 恒星光晕效果 */}
       <mesh scale={[1.3 * starGlow, 1.3 * starGlow, 1.3 * starGlow]}>
-        <sphereGeometry args={[scaledRadius, 64, 64]} />
+        <sphereGeometry args={[scaledRadius, 32, 32]} />
         <meshBasicMaterial 
           color={body.color}
           transparent
@@ -61,7 +61,7 @@ function Star({ body }: StarProps) {
 
       {/* 更外层光晕 */}
       <mesh scale={[1.8 * starGlow, 1.8 * starGlow, 1.8 * starGlow]}>
-        <sphereGeometry args={[scaledRadius, 64, 64]} />
+        <sphereGeometry args={[scaledRadius, 32, 32]} />
         <meshBasicMaterial 
           color={body.emissiveColor || '#ffaa00'}
           transparent
@@ -73,7 +73,7 @@ function Star({ body }: StarProps) {
       
       {/* 最外层光晕 */}
       <mesh scale={[2.5 * starGlow, 2.5 * starGlow, 2.5 * starGlow]}>
-        <sphereGeometry args={[scaledRadius, 64, 64]} />
+        <sphereGeometry args={[scaledRadius, 24, 24]} />
         <meshBasicMaterial 
           color="#ffcc00"
           transparent
@@ -86,7 +86,7 @@ function Star({ body }: StarProps) {
       
       {/* 脉动发光效果 */}
       <mesh scale={[3.2 * starGlow, 3.2 * starGlow, 3.2 * starGlow]}>
-        <sphereGeometry args={[scaledRadius, 64, 64]} />
+        <sphereGeometry args={[scaledRadius, 24, 24]} />
         <meshBasicMaterial 
           color="#ffee88"
           transparent
